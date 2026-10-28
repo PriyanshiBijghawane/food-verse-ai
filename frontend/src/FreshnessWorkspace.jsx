@@ -16,7 +16,7 @@ import {
   FileText
 } from 'lucide-react'
 
-export default function FreshnessWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' }) {
+export default function FreshnessWorkspace({ apiBaseUrl = 'http://127.0.0.1:8001' }) {
   const [selectedFile, setSelectedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -168,7 +168,7 @@ export default function FreshnessWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000
           <div>
             <h2 className="section-title">Produce & Food Specimen Analysis</h2>
             <p className="section-subtitle">
-              Upload a clear photo under balanced lighting for multi-feature visual spoilage assessment.
+              A photo can reveal visible surface cues only. This heuristic screening cannot determine whether food is safe to eat.
             </p>
           </div>
           <span className="card-badge badge-emerald">Heuristic Vision Pipeline</span>
@@ -418,13 +418,13 @@ export default function FreshnessWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000
               >
                 <div>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Detected Specimen
+                    Food Label (Best Effort)
                   </span>
                   <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-primary-900)' }}>
                     {result.detected_food}
                   </h3>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                    Category: <strong>{result.food_category.toUpperCase()}</strong> | Confidence: {(result.confidence * 100).toFixed(0)}%
+                    Category: <strong>{result.food_category.toUpperCase()}</strong> | Visual screening only
                   </span>
                 </div>
 
@@ -442,10 +442,26 @@ export default function FreshnessWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000
                     {result.freshness_label} ({result.freshness_score}/100)
                   </span>
                   <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                    Safety Status: <strong>{result.safety_status}</strong>
+                    Not a food-safety determination
                   </div>
                 </div>
               </div>
+
+              {result.pipeline_disclosure && (
+                <div style={{
+                  fontSize: '0.76rem',
+                  color: 'var(--color-text-secondary)',
+                  lineHeight: 1.45,
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                }}>
+                  <strong>Analysis method ({result.analysis_mode}):</strong> {result.pipeline_disclosure}
+                  <br />
+                  Visual appearance cannot establish microbial safety or detect hidden contamination. Do not use this score to decide whether food is safe to consume.
+                </div>
+              )}
 
               {/* Freshness Score Bar */}
               <div>

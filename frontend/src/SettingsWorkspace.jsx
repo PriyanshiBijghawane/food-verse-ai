@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 
 export default function SettingsWorkspace({
-  apiBaseUrl = 'http://127.0.0.1:8000',
+  apiBaseUrl = 'http://127.0.0.1:8001',
   currentSettings = null,
   onSettingsUpdated = null,
   onNotification = null

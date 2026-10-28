@@ -85,8 +85,16 @@ class TestKitchenAssistant:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "success"
-        assert len(data["detected_from_image"]) >= 1
+        assert data["detected_from_image"] == []
         assert len(data["ingredients"]) >= 2
+
+    def test_image_only_request_does_not_invent_pantry_ingredients(self):
+        resp = client.post(
+            "/api/v1/cooking/assistant",
+            files={"image": ("pantry.jpg", _make_jpeg_bytes(), "image/jpeg")},
+        )
+        assert resp.status_code == 422
+        assert "Food-101 model recognizes prepared dishes" in resp.json()["detail"]
 
     def test_empty_request_rejected(self):
         resp = client.post(
@@ -94,7 +102,7 @@ class TestKitchenAssistant:
             data={"ingredients": "   "},
         )
         assert resp.status_code == 400
-        assert "provide ingredient descriptions or upload a photo" in resp.json()["detail"].lower()
+        assert "enter at least one ingredient" in resp.json()["detail"].lower()
 
     def test_invalid_image_format_rejected(self):
         resp = client.post(
@@ -104,6 +112,22 @@ class TestKitchenAssistant:
         )
         assert resp.status_code == 400
         assert "Invalid image format" in resp.json()["detail"]
+
+    def test_recipe_distinguishes_entered_ingredients_and_suggestions(self, monkeypatch):
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        resp = client.post(
+            "/api/v1/cooking/assistant",
+            data={"ingredients": "spinach, tomatoes"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["input_ingredients_used"] == ["spinach", "tomatoes"]
+        sources = {item["source"] for item in data["ingredients"]}
+        assert "provided" in sources
+        assert "suggested" in sources
 
 
 # ===========================================================================
@@ -344,6 +368,9 @@ class TestMockedLLMProvider:
             assert "llama-3.3-70b-versatile" in data["model_id"]
             assert data["dish_name"] == "Truffle Scented Mushroom Risotto"
             assert len(data["food_safety_guidance"]) >= 2
+            assert data["input_ingredients_used"] == ["rice", "mushrooms"]
+            assert "garlic" not in data["input_ingredients_used"]
+            assert {item["source"] for item in data["ingredients"]} == {"provided"}
 
     @pytest.mark.anyio
     async def test_mocked_llm_provider_timeout_triggers_fallback(self, monkeypatch):

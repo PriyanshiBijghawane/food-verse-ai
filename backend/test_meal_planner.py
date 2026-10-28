@@ -24,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
+from routers import meal_planner
 
 client = TestClient(app)
 
@@ -77,6 +78,45 @@ class TestMealPlannerProfileValidation:
         bad = dict(_VALID_PROFILE, activity_level="couch_potato")
         resp = client.post("/api/v1/meal-plan/generate", json=bad)
         assert resp.status_code == 422
+
+
+class TestMealPlannerFailsClosed:
+
+    def test_no_diet_safe_candidates_returns_clear_error(self, monkeypatch):
+        monkeypatch.setattr(meal_planner, "_is_meal_safe", lambda *args: False)
+
+        resp = client.post("/api/v1/meal-plan/generate", json=_VALID_PROFILE)
+
+        assert resp.status_code == 422
+        assert "No breakfast options satisfy" in resp.json()["detail"]
+
+    def test_no_safe_lunch_alternative_returns_clear_error(self, monkeypatch):
+        monkeypatch.setattr(
+            meal_planner,
+            "_MEAL_DATABASE",
+            {**meal_planner._MEAL_DATABASE, "lunch": []},
+        )
+        profile_two_meals = dict(_VALID_PROFILE, meals_per_day=2)
+
+        resp = client.post("/api/v1/meal-plan/generate", json=profile_two_meals)
+
+        assert resp.status_code == 422
+        assert "No lunch alternatives satisfy" in resp.json()["detail"]
+
+
+class TestMealPlannerDietaryFiltering:
+
+    def test_vegan_filter_allows_non_animal_words_and_seed_butter(self):
+        vegan_snack = {
+            "ingredients": ["Honeycrisp Apple 1 medium", "Sunflower Seed Butter 20g"],
+            "allergens": [],
+            "tags": ["vegan"],
+        }
+
+        assert meal_planner._is_meal_safe(vegan_snack, [], [], [], "vegan")
+
+        vegan_snack["ingredients"].append("Honey 1 tsp")
+        assert not meal_planner._is_meal_safe(vegan_snack, [], [], [], "vegan")
 
 
 # ===========================================================================

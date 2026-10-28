@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 
 export default function CookingAssistantWorkspace({
-  apiBaseUrl = 'http://127.0.0.1:8000',
+  apiBaseUrl = 'http://127.0.0.1:8001',
   userSettings = null,
   onNotification = null
 }) {
@@ -164,6 +164,10 @@ export default function CookingAssistantWorkspace({
       ? recipe.dietary_tags.join(' • ')
       : recipe.dietary_tags
     : recipe?.dietary_compatibility || (dietary === 'none' ? 'Standard' : dietary.toUpperCase())
+  const normalizeIngredient = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const enteredIngredients = ingredientsText.split(/[,;\n]+/).map((value) => value.trim()).filter(Boolean)
+  const recipeInputIngredients = (recipe?.input_ingredients_used || []).map(normalizeIngredient)
+  const recipeSubstitutions = recipe?.substitutions || []
 
   return (
     <div className="module-view">
@@ -274,8 +278,11 @@ export default function CookingAssistantWorkspace({
                   marginBottom: '6px',
                 }}
               >
-                Upload Pantry or Fridge Photo (Optional Vision Assistance)
+                Upload Pantry or Fridge Photo (Optional Reference Only)
               </label>
+              <p style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.4 }}>
+                Food-101 recognizes prepared dishes, not pantry ingredients. This photo is not used to infer ingredients; enter the ingredients in the text field above.
+              </p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -303,7 +310,7 @@ export default function CookingAssistantWorkspace({
                   }}
                 >
                   <Upload size={18} color="var(--color-primary-600)" />
-                  <span>Click to attach an image of your ingredients or pantry</span>
+                  <span>Click to attach a reference photo (Food-101 does not detect pantry ingredients)</span>
                 </div>
               ) : (
                 <div
@@ -608,8 +615,31 @@ export default function CookingAssistantWorkspace({
                 <div style={{ background: '#ffffff', padding: '18px', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(22, 62, 48, 0.08)' }}>
                   <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--color-primary-900)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Utensils size={16} color="#059669" />
-                    Ingredients Checklist
+                    Recipe Ingredients
                   </h4>
+                  {enteredIngredients.length > 0 && (
+                    <div style={{ marginBottom: '14px', padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: '#f8fafc', fontSize: '0.78rem', lineHeight: 1.5 }}>
+                      <strong>Your entered ingredients:</strong>
+                      <ul style={{ margin: '6px 0 0', paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {enteredIngredients.map((ingredient, idx) => {
+                          const normalizedInput = normalizeIngredient(ingredient)
+                          const included = recipeInputIngredients.includes(normalizedInput)
+                          const substitution = recipeSubstitutions.find(
+                            (item) => normalizeIngredient(item.original || '') === normalizedInput
+                          )
+                          return (
+                            <li key={`${ingredient}-${idx}`} style={{ color: included || substitution ? '#166534' : '#92400e' }}>
+                              {ingredient}: {included
+                                ? 'listed in the recipe'
+                                : substitution
+                                  ? `substituted with ${substitution.substitute || substitution.replacement}`
+                                  : 'not explicitly listed in the recipe'}
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
+                  )}
                   {recipe.ingredients && recipe.ingredients.length > 0 ? (
                     <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       {recipe.ingredients.map((item, idx) => (
@@ -620,6 +650,18 @@ export default function CookingAssistantWorkspace({
                             <>
                               <strong>{item.quantity}</strong> {item.name}{' '}
                               {item.notes && <em style={{ color: 'var(--color-text-muted)' }}>({item.notes})</em>}
+                              <span style={{
+                                display: 'inline-block',
+                                marginLeft: '5px',
+                                padding: '2px 6px',
+                                borderRadius: '999px',
+                                background: item.source === 'provided' ? '#dcfce7' : item.source === 'substitute' ? '#fef3c7' : '#e2e8f0',
+                                color: item.source === 'provided' ? '#166534' : item.source === 'substitute' ? '#92400e' : '#475569',
+                                fontSize: '0.66rem',
+                                fontWeight: 700,
+                              }}>
+                                {item.source === 'provided' ? 'Entered' : item.source === 'substitute' ? 'Substitute' : 'Suggested addition'}
+                              </span>
                             </>
                           )}
                         </li>
@@ -715,7 +757,7 @@ export default function CookingAssistantWorkspace({
 
               {/* Engine Meta */}
               <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
-                Recipe generated via <strong>{recipe.generation_engine || 'Dynamic Culinary Engine'}</strong>. Nutrition figures are estimates computed per serving.
+                Recipe generated via <strong>{recipe.generation_engine || 'Dynamic Culinary Engine'}</strong>. {recipe.generation_disclosure} Nutrition figures are estimates computed per serving.
               </div>
             </div>
           )}

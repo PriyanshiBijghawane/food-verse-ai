@@ -14,3 +14,15 @@ build/
 backend/uploads/
 backend/foodverse.db
 backend/data/
+
+# ML models and caches
+*.h5
+*.pt
+*.pth
+*.onnx
+**/__pycache__/
+**/.cache/
+**/models/
+
+# Editor settings
+.vscode/

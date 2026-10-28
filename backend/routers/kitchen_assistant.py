@@ -28,7 +28,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -60,6 +60,7 @@ class IngredientItem(BaseModel):
     name: str
     quantity: str
     notes: Optional[str] = None
+    source: Literal["provided", "suggested", "substitute"] = "suggested"
 
 
 class InstructionStep(BaseModel):
@@ -166,6 +167,46 @@ def _generate_food_safety_guidance(ingredients: list[str], dish_name: str) -> li
     )
 
     return guidance
+
+
+def _normalize_ingredient_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _annotate_recipe_ingredient_sources(
+    recipe_data: dict[str, Any],
+    input_ingredients: list[str],
+) -> None:
+    """Mark recipe additions and report only input ingredients visibly listed in it."""
+    normalized_inputs = {
+        ingredient: _normalize_ingredient_text(ingredient)
+        for ingredient in input_ingredients
+        if ingredient.strip()
+    }
+    used_inputs: list[str] = []
+    trust_generated_source = recipe_data.get("engine_mode") == "rule_based_fallback"
+
+    for item in recipe_data.get("ingredients", []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", ""))
+        normalized_item = f" {_normalize_ingredient_text(name)} "
+        source = item.get("source")
+        if not trust_generated_source or source not in {"provided", "suggested", "substitute"}:
+            source = "suggested"
+            for input_ingredient, normalized_input in normalized_inputs.items():
+                if normalized_input and f" {normalized_input} " in normalized_item:
+                    source = "provided"
+                    if input_ingredient not in used_inputs:
+                        used_inputs.append(input_ingredient)
+        elif source == "provided":
+            for input_ingredient, normalized_input in normalized_inputs.items():
+                if normalized_input and f" {normalized_input} " in normalized_item:
+                    if input_ingredient not in used_inputs:
+                        used_inputs.append(input_ingredient)
+        item["source"] = source
+
+    recipe_data["input_ingredients_used"] = used_inputs
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +402,7 @@ def _build_custom_dynamic_recipe(
                 "name": replacement_name,
                 "quantity": "250g (to portion)",
                 "notes": f"Plant-based protein replacement for '{item}' to satisfy vegetarian restriction",
+                "source": "substitute",
             })
             substitutions.append({
                 "original": item.title(),
@@ -374,6 +416,7 @@ def _build_custom_dynamic_recipe(
                 "name": item.title(),
                 "quantity": "As preferred / to portion",
                 "notes": "Pantry ingredient provided by user",
+                "source": "provided",
             })
 
     # Add core culinary seasonings from template
@@ -382,7 +425,7 @@ def _build_custom_dynamic_recipe(
         if is_vegetarian and any(m in standard_name for m in MEAT_KEYWORDS):
             continue
         if not any(standard["name"].lower() in item.lower() for item in clean_ing_list):
-            recipe_ingredients.append(standard)
+            recipe_ingredients.append({**standard, "source": "suggested"})
 
     dietary_tags = list(best_template["dietary_tags"])
     if dietary and dietary != "none" and dietary.title() not in dietary_tags:
@@ -644,29 +687,6 @@ async def generate_cooking_guidance(
             pil_img = Image.open(io.BytesIO(raw_bytes))
             pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
 
-            # Try to identify food items via ViT model in main if ready
-            try:
-                import main
-                if main._model_ready and main._model and main._processor:
-                    inputs = main._processor(images=pil_img, return_tensors="pt")
-                    import torch
-                    with torch.no_grad():
-                        out = main._model(**inputs)
-                        probs = torch.softmax(out.logits, dim=-1)
-                        topk_probs, topk_indices = torch.topk(probs, k=3, dim=-1)
-                        for prob, idx in zip(topk_probs[0], topk_indices[0]):
-                            if prob.item() >= 0.15:
-                                raw_label = main._model.config.id2label[idx.item()]
-                                clean_name = raw_label.replace("_", " ").title()
-                                detected_from_image.append(clean_name)
-                                if clean_name.lower() not in [i.lower() for i in collected_ingredients]:
-                                    collected_ingredients.append(clean_name)
-            except Exception as model_err:
-                logger.debug("ViT detection skipped or failed: %s", model_err)
-
-            if not detected_from_image:
-                detected_from_image.append("Fresh produce / pantry item")
-
         except (UnidentifiedImageError, ValueError) as ve:
             raise HTTPException(status_code=400, detail=f"Cannot decode image: {ve}")
         except HTTPException:
@@ -677,9 +697,17 @@ async def generate_cooking_guidance(
 
     # 4. Guard against empty submissions
     if not collected_ingredients and not detected_from_image:
+        if image and image.filename:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Enter at least one ingredient to generate a recipe. The Food-101 model recognizes prepared dishes, "
+                    "not pantry ingredients, so an image alone cannot supply recipe ingredients."
+                ),
+            )
         raise HTTPException(
             status_code=400,
-            detail="Please provide ingredient descriptions or upload a photo of your ingredients to generate a recipe.",
+            detail="Please enter at least one ingredient to generate a recipe.",
         )
 
     # 5. Generate recipe via AI or dynamic culinary engine fallback
@@ -708,6 +736,7 @@ async def generate_cooking_guidance(
     recipe_dict["food_safety_guidance"] = _generate_food_safety_guidance(
         collected_ingredients, recipe_dict.get("dish_name", "")
     )
+    _annotate_recipe_ingredient_sources(recipe_dict, collected_ingredients)
 
     # 6. Validate through Pydantic model
     try:
@@ -726,4 +755,5 @@ async def generate_cooking_guidance(
         fallback["food_safety_guidance"] = _generate_food_safety_guidance(
             collected_ingredients, fallback.get("dish_name", "")
         )
+        _annotate_recipe_ingredient_sources(fallback, collected_ingredients)
         return RecipeResponse(**fallback)

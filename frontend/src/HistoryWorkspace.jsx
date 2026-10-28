@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react'
 import {
   History,
   Trash2,
-  ExternalLink,
-  Filter,
   Search,
   ScanLine,
   Leaf,
@@ -25,17 +23,25 @@ export default function HistoryWorkspace({ apiBaseUrl }) {
   const [deletingId, setDeletingId] = useState(null)
   const [selectedItem, setSelectedItem] = useState(null)
   const [feedbackMsg, setFeedbackMsg] = useState(null)
+  const [loadError, setLoadError] = useState(null)
 
   const fetchHistory = async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const res = await fetch(`${apiBaseUrl}/api/v1/history`)
-      if (res.ok) {
-        const data = await res.json()
-        setItems(data)
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        throw new Error(data?.detail || `History request failed (HTTP ${res.status}).`)
       }
+      if (!Array.isArray(data)) {
+        throw new Error('The history API returned an unexpected response.')
+      }
+      setItems(data)
     } catch (err) {
-      console.error('Failed to fetch history:', err)
+      setLoadError(err instanceof TypeError
+        ? `Cannot reach the Food Verse API at ${apiBaseUrl}.`
+        : err.message || 'Failed to load analysis history.')
     } finally {
       setLoading(false)
     }
@@ -97,44 +103,41 @@ export default function HistoryWorkspace({ apiBaseUrl }) {
   })
 
   return (
-    <div className="workspace-container">
+    <div className="history-page">
       {/* Header Banner */}
-      <div className="workspace-header">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-100 rounded-xl text-emerald-800">
-                <History className="w-6 h-6" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Analysis & Intelligence History</h1>
-                <p className="text-sm text-gray-600">
-                  Review, audit, or safely delete previously recorded food analyses, freshness assessments, and recipes.
-                </p>
-              </div>
+      <header className="history-header">
+        <div className="history-header-row">
+          <div className="history-heading">
+            <div className="history-heading-icon">
+              <History size={24} aria-hidden="true" />
+            </div>
+            <div>
+              <h1>Analysis &amp; Intelligence History</h1>
+              <p>
+                Review or delete previously recorded food analyses, freshness assessments, inspections, and recipes.
+              </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={fetchHistory}
-            className="btn btn-secondary flex items-center gap-2 text-sm"
+            className="history-refresh"
             title="Refresh history"
           >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
+            <RefreshCw size={16} aria-hidden="true" />
+            <span>Refresh</span>
           </button>
         </div>
 
-        {/* Feedback alert */}
         {feedbackMsg && (
-          <div className="mt-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2 text-sm">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            {feedbackMsg.text}
+          <div className="history-feedback" role="status">
+            <CheckCircle2 size={17} aria-hidden="true" />
+            <span>{feedbackMsg.text}</span>
           </div>
         )}
 
-        {/* Filter & Search Bar */}
-        <div className="mt-6 flex flex-wrap gap-3 items-center justify-between">
-          <div className="flex flex-wrap gap-2">
+        <div className="history-toolbar">
+          <div className="history-filters" aria-label="Filter history">
             {[
               { id: 'all', label: 'All Activities' },
               { id: 'food', label: 'Food Recognition' },
@@ -144,161 +147,157 @@ export default function HistoryWorkspace({ apiBaseUrl }) {
               { id: 'meal_plan', label: 'Meal Plans' },
             ].map((f) => (
               <button
+                type="button"
                 key={f.id}
                 onClick={() => setFilterType(f.id)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  filterType === f.id
-                    ? 'bg-emerald-700 text-white shadow-sm'
-                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`history-filter ${filterType === f.id ? 'history-filter-active' : ''}`}
+                aria-pressed={filterType === f.id}
               >
                 {f.label}
               </button>
             ))}
           </div>
 
-          <div className="relative min-w-[260px]">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <label className="history-search">
+            <Search size={16} aria-hidden="true" />
             <input
-              type="text"
+              type="search"
               placeholder="Search past analyses..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
             />
-          </div>
+          </label>
         </div>
-      </div>
+      </header>
 
-      {/* Content Area */}
-      <div className="mt-6">
+      <main className="history-content">
         {loading ? (
-          <div className="py-20 text-center text-gray-500">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto text-emerald-600 mb-3" />
-            <p className="text-sm">Loading historical records...</p>
+          <div className="history-state">
+            <Loader2 className="history-spinner" size={30} aria-hidden="true" />
+            <p>Loading historical records...</p>
+          </div>
+        ) : loadError ? (
+          <div className="history-state history-state-error" role="alert">
+            <AlertCircle size={30} aria-hidden="true" />
+            <h2>History Could Not Be Loaded</h2>
+            <p>{loadError}</p>
+            <button type="button" onClick={fetchHistory} className="history-refresh">
+              <RefreshCw size={16} aria-hidden="true" />
+              Retry
+            </button>
           </div>
         ) : filteredItems.length === 0 ? (
-          <div className="py-16 text-center bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
-            <div className="w-16 h-16 mx-auto mb-4 bg-gray-50 rounded-full flex items-center justify-center text-gray-400">
-              <History className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-800">No Analysis Records Found</h3>
-            <p className="text-sm text-gray-500 max-w-md mx-auto mt-1">
+          <div className="history-state">
+            <History size={34} aria-hidden="true" />
+            <h2>No Analysis Records Found</h2>
+            <p>
               {searchQuery || filterType !== 'all'
-                ? 'No records match your selected filter. Try clearing the search query or selecting All Activities.'
-                : 'Run a Food Analysis, Freshness Check, Kitchen Inspection, or generate a Recipe to see your persistent records here.'}
+                ? 'No records match these filters. Try another search or select All Activities.'
+                : 'Run a food analysis, freshness check, kitchen inspection, or generate a recipe to see records here.'}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="history-grid">
             {filteredItems.map((item) => (
-              <div
+              <article
                 key={item.id}
                 onClick={() => setSelectedItem(item)}
-                className="bg-white rounded-xl p-5 border border-gray-200 hover:border-emerald-500 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelectedItem(item)
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                className="history-card"
               >
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 bg-gray-50 rounded-lg">{getTypeIcon(item.type)}</div>
-                      <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                        {item.type.replace('_', ' ')}
-                      </span>
-                    </div>
-                    <span
-                      className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                        item.execution_mode === 'demo'
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                      }`}
-                    >
-                      {item.execution_mode.toUpperCase()}
+                <div className="history-card-top">
+                  <div className="history-type">
+                    <span className={`history-type-icon history-type-${item.type}`}>
+                      {getTypeIcon(item.type)}
                     </span>
+                    <span>{item.type.replace('_', ' ')}</span>
                   </div>
-
-                  <h3 className="font-semibold text-gray-900 text-base line-clamp-1 mb-1">{item.title}</h3>
-                  <p className="text-sm text-gray-600 line-clamp-2 mb-4">{item.summary}</p>
+                  <span className={`history-mode ${item.execution_mode === 'demo' ? 'history-mode-demo' : ''}`}>
+                    {item.execution_mode}
+                  </span>
                 </div>
 
-                <div className="flex items-center justify-between pt-3 border-t border-gray-100 text-xs text-gray-400">
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>{new Date(item.created_at * 1000).toLocaleDateString()}</span>
-                  </div>
+                <div className="history-card-body">
+                  <h2>{item.title}</h2>
+                  <p>{item.summary}</p>
+                </div>
+
+                <div className="history-card-footer">
+                  <span className="history-date">
+                    <Clock size={14} aria-hidden="true" />
+                    {new Date(item.created_at * 1000).toLocaleDateString()}
+                  </span>
                   <button
+                    type="button"
                     onClick={(e) => handleDelete(item.id, e)}
                     disabled={deletingId === item.id}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="history-delete"
                     title="Delete record"
+                    aria-label={`Delete ${item.title}`}
                   >
                     {deletingId === item.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-red-600" />
+                      <Loader2 className="history-spinner" size={17} aria-hidden="true" />
                     ) : (
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 size={17} aria-hidden="true" />
                     )}
                   </button>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
-      </div>
+      </main>
 
-      {/* Details Modal */}
       {selectedItem && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                {getTypeIcon(selectedItem.type)}
-                <span className="font-semibold text-gray-800 uppercase text-xs tracking-wider">
-                  {selectedItem.type.replace('_', ' ')} Details
+        <div className="history-modal-backdrop" onClick={() => setSelectedItem(null)}>
+          <section
+            className="history-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="history-modal-header">
+              <div className="history-type">
+                <span className={`history-type-icon history-type-${selectedItem.type}`}>
+                  {getTypeIcon(selectedItem.type)}
                 </span>
+                <span>{selectedItem.type.replace('_', ' ')} details</span>
               </div>
-              <button
-                onClick={() => setSelectedItem(null)}
-                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
-              >
+              <button type="button" className="history-modal-close" onClick={() => setSelectedItem(null)} aria-label="Close details">
                 &times;
               </button>
             </div>
 
-            <h2 className="text-xl font-bold text-gray-900 mb-2">{selectedItem.title}</h2>
-            <div className="p-3 bg-gray-50 rounded-xl text-sm text-gray-700 mb-4 whitespace-pre-wrap">
-              {selectedItem.summary}
-            </div>
+            <h2 id="history-modal-title">{selectedItem.title}</h2>
+            <p className="history-modal-summary">{selectedItem.summary}</p>
+            <dl className="history-details">
+              <div><dt>Record ID</dt><dd>{selectedItem.id}</dd></div>
+              <div><dt>Execution mode</dt><dd>{selectedItem.execution_mode}</dd></div>
+              <div><dt>Recorded at</dt><dd>{new Date(selectedItem.created_at * 1000).toLocaleString()}</dd></div>
+            </dl>
 
-            <div className="space-y-2 text-xs text-gray-500 mb-6">
-              <div className="flex justify-between">
-                <span>Record ID:</span>
-                <span className="font-mono">{selectedItem.id}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Execution Mode:</span>
-                <span className="font-semibold text-gray-700 uppercase">{selectedItem.execution_mode}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Recorded At:</span>
-                <span>{new Date(selectedItem.created_at * 1000).toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3">
+            <div className="history-modal-actions">
+              <button type="button" className="history-refresh" onClick={() => setSelectedItem(null)}>Close</button>
               <button
-                onClick={() => setSelectedItem(null)}
-                className="btn btn-secondary text-sm px-4 py-2"
+                type="button"
+                onClick={(event) => handleDelete(selectedItem.id, event)}
+                disabled={deletingId === selectedItem.id}
+                className="history-delete-confirm"
               >
-                Close
-              </button>
-              <button
-                onClick={(e) => handleDelete(selectedItem.id, e)}
-                className="btn btn-danger text-sm px-4 py-2 flex items-center gap-1.5"
-              >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 size={16} aria-hidden="true" />
                 Delete Record
               </button>
             </div>
-          </div>
+          </section>
         </div>
       )}
     </div>

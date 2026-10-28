@@ -19,45 +19,45 @@ export default function DocumentationWorkspace() {
       path: '/api/v1/food/recognize',
       module: 'Food Recognition',
       icon: ScanLine,
-      description: 'Ingests food imagery, performs spatial quadrant cropping for multi-dish thali/platter parsing, and returns top-5 classifications with estimated macronutrients and calories.',
-      input: 'multipart/form-data with file: Image (PNG, JPG, WEBP)',
-      output: 'JSON: { predicted_label, confidence, top_5, detected_items, nutrition: { calories, protein_g, carbs_g, fat_g } }'
+      description: 'Runs the Food-101 dish classifier and returns its ranked class candidates. Nutrition is a separate reference estimate; the classifier does not detect ingredients or estimate portions.',
+      input: 'multipart/form-data with file: image (PNG, JPG, WEBP; maximum 25 MB)',
+      output: 'JSON: { predicted_label, candidate_label, confidence (uncalibrated model score), confidence_tier (provisional threshold band), is_uncertain, confidence_note, top_5, model_id, nutrition }'
     },
     {
       method: 'POST',
       path: '/api/v1/food/freshness',
       module: 'Freshness Detection',
       icon: Leaf,
-      description: 'Evaluates multi-spectral color distributions in HSV and RGB spaces, measures browning and surface rot variance, detects mold pigmentation, and estimates shelf-life.',
-      input: 'multipart/form-data with file: Image, storage_condition: ambient | refrigerated | frozen',
-      output: 'JSON: { freshness_score (0-100), classification: fresh | decaying | spoiled, surface_metrics, preservation_advice }'
+      description: 'Evaluates visible color and texture cues and returns conservative freshness guidance. The response discloses whether the active classifier or visual heuristics produced the result.',
+      input: 'multipart/form-data with file: image; optional food_hint query parameter',
+      output: 'JSON: { detected_food, food_category, confidence, analysis_mode, freshness_score, freshness_label, safety_status, extracted_features, pipeline_disclosure, limitations }'
     },
     {
       method: 'POST',
       path: '/api/v1/hygiene/audit',
       module: 'Restaurant Hygiene',
       icon: Store,
-      description: 'Runs automated sanitation auditing over kitchen prep stations, checking clutter, surface spills, protocol hazards, and generating itemized violation scorecards.',
-      input: 'multipart/form-data with file: Image or Video (MP4, MOV)',
-      output: 'JSON: { overall_hygiene_score, compliance_grade (A/B/C/F), violations: [ { category, severity, description } ], audit_report_id }'
+      description: 'Audits observable conditions in a still image or sampled video frames. Depending on available models and configuration, results may use object detection, a vision API, or local visual heuristics; the result includes the active engine and limitations.',
+      input: 'multipart/form-data with file: image or video (bounded size, duration, and frame sampling)',
+      output: 'JSON: { audit_id, compliance_score, audit_status, violations, observations, inspection_engine, analysis_mode, sampling_metadata, limitations, disclaimer }'
     },
     {
       method: 'POST',
       path: '/api/v1/cooking/assistant',
       module: 'Smart Cooking Assistant',
       icon: ChefHat,
-      description: 'Accepts ingredient text or pantry/fridge photos, detects items via vision, validates inputs, and synthesizes step-by-step instructions with timers and nutrient estimates.',
-      input: 'multipart/form-data: ingredients, dietary_preference, cuisine, max_time_minutes, skill_level, optional image',
-      output: 'JSON: { dish_name, summary, prep_time, cook_time, total_time, ingredients, instructions: [ { step, title, instruction, timer_minutes, chef_tip } ], nutrition_estimates }'
+      description: 'Builds a structured recipe from ingredients entered as text. Food-101 is a prepared-dish classifier, not an ingredient detector, so an image alone cannot provide recipe ingredients.',
+      input: 'multipart/form-data: ingredients (required), dietary_preference, cuisine, max_time_minutes, skill_level; image uploads are not used to identify ingredients',
+      output: 'JSON: { dish_name, ingredients, instructions, nutrition_estimates, engine_mode, generation_engine, generation_disclosure, food_safety_guidance }'
     },
     {
       method: 'POST',
       path: '/api/v1/meal-plan/generate',
       module: 'Personalized Meal Planner',
       icon: CalendarDays,
-      description: 'Computes physiological BMR and TDEE using the Mifflin-St Jeor equation, enforces strict allergen exclusions, and constructs a 5-meal daily plan and 7-day schedule.',
-      input: 'JSON: { age, gender, height_cm, weight_kg, activity_level, primary_goal, diet_type, allergies: [], food_restrictions: [] }',
-      output: 'JSON: { biometric_calculations, daily_nutrition_totals, meals: [ 5 occasions ], alternative_meals, weekly_overview, hydration_guidance }'
+      description: 'Computes profile-based nutrition targets and builds meal schedules using deterministic planning rules and a food catalog; it is not generative AI.',
+      input: 'JSON: { age, gender, height_cm, weight_kg, activity_level, primary_goal, diet_type, allergies, food_restrictions, days, meals_per_day, servings }',
+      output: 'JSON: { biometric_calculations, daily_nutrition_totals, meals, alternative_meals, weekly_overview, daily_plans, consolidated_shopping_list, disclaimer }'
     },
     {
       method: 'GET/POST',

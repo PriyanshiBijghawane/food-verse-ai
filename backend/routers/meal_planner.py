@@ -617,12 +617,21 @@ def _is_meal_safe(
     if diet_clean in ["vegan", "vegetarian"]:
         for ing in meal.get("ingredients", []):
             ing_lower = ing.lower()
-            if any(m in ing_lower for m in MEAT_KEYWORDS):
+            if any(re.search(rf"\b{re.escape(m)}s?\b", ing_lower) for m in MEAT_KEYWORDS):
                 return False
-            if diet_clean == "vegan" and any(d in ing_lower for d in ["egg", "yogurt", "feta", "cheese", "honey", "dairy", "butter", "ghee"]):
-                if "almond milk" in ing_lower or "oat milk" in ing_lower or "almond butter" in ing_lower:
-                    continue
-                return False
+            if diet_clean == "vegan":
+                animal_derived_terms = ["egg", "yogurt", "feta", "cheese", "honey", "dairy", "ghee"]
+                if any(re.search(rf"\b{term}s?\b", ing_lower) for term in animal_derived_terms):
+                    return False
+                uses_butter = bool(re.search(r"\bbutter\b", ing_lower))
+                plant_butter = bool(
+                    re.search(
+                        r"\b(?:almond|peanut|sunflower(?: seed)?|cashew|walnut|hazelnut|soy)\s+butter\b",
+                        ing_lower,
+                    )
+                )
+                if uses_butter and not plant_butter:
+                    return False
 
     return True
 
@@ -808,11 +817,15 @@ def _generate_multi_day_meal_plan(profile: UserProfileRequest, bios: Dict[str, A
             safe_candidates = [c for c in candidates if _is_meal_safe(c, allergies, restrictions, excluded, diet)]
 
             # Pick candidate cycling through safe options for multi-day variety
-            if safe_candidates:
-                chosen = safe_candidates[(d - 1) % len(safe_candidates)]
-            else:
-                # Fallback to first candidate and note safety
-                chosen = candidates[0]
+            if not safe_candidates:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No {occ_title.lower()} options satisfy the selected dietary preferences, "
+                        "allergies, and excluded foods. Adjust the restrictions and try again."
+                    ),
+                )
+            chosen = safe_candidates[(d - 1) % len(safe_candidates)]
 
             cal = round(target_cal * cal_pct) * servings
             prot = round(((cal * 0.25) / 4.0), 1)
@@ -882,7 +895,12 @@ def _generate_multi_day_meal_plan(profile: UserProfileRequest, bios: Dict[str, A
     alternative_meals: List[AlternativeMeal] = []
     lunch_candidates = _MEAL_DATABASE["lunch"]
     safe_lunch_candidates = [c for c in lunch_candidates if _is_meal_safe(c, allergies, restrictions, excluded, diet)]
-    alt_lunch = safe_lunch_candidates[1] if len(safe_lunch_candidates) > 1 else safe_lunch_candidates[0] if safe_lunch_candidates else lunch_candidates[0]
+    if not safe_lunch_candidates:
+        raise HTTPException(
+            status_code=422,
+            detail="No lunch alternatives satisfy the selected dietary preferences, allergies, and excluded foods.",
+        )
+    alt_lunch = safe_lunch_candidates[1] if len(safe_lunch_candidates) > 1 else safe_lunch_candidates[0]
     lunch_cal = round(target_cal * 0.32) * servings
 
     alternative_meals.append(
@@ -903,7 +921,12 @@ def _generate_multi_day_meal_plan(profile: UserProfileRequest, bios: Dict[str, A
 
     dinner_candidates = _MEAL_DATABASE["dinner"]
     safe_dinner_candidates = [c for c in dinner_candidates if _is_meal_safe(c, allergies, restrictions, excluded, diet)]
-    alt_dinner = safe_dinner_candidates[1] if len(safe_dinner_candidates) > 1 else safe_dinner_candidates[0] if safe_dinner_candidates else dinner_candidates[0]
+    if not safe_dinner_candidates:
+        raise HTTPException(
+            status_code=422,
+            detail="No dinner alternatives satisfy the selected dietary preferences, allergies, and excluded foods.",
+        )
+    alt_dinner = safe_dinner_candidates[1] if len(safe_dinner_candidates) > 1 else safe_dinner_candidates[0]
     din_cal = round(target_cal * 0.28) * servings
 
     alternative_meals.append(

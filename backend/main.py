@@ -305,7 +305,13 @@ async def recognize_food(file: UploadFile = File(...)):
 
     # --- read & decode image with EXIF-first preprocessing --------------------
     try:
-        raw_bytes = await file.read()
+        max_upload_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+        raw_bytes = await file.read(max_upload_bytes + 1)
+        if len(raw_bytes) > max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image exceeds the maximum upload size of {settings.MAX_UPLOAD_MB} MB.",
+            )
         raw_img = Image.open(io.BytesIO(raw_bytes))
         # Apply EXIF transposition BEFORE converting to RGB
         try:
@@ -325,6 +331,8 @@ async def recognize_food(file: UploadFile = File(...)):
             status_code=400,
             detail=str(ve),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=400,
@@ -367,18 +375,24 @@ async def recognize_food(file: UploadFile = File(...)):
             confidence_tier = "high"
             is_uncertain = False
             predicted_label = top["label"]
-            confidence_note = f"High confidence prediction ({top_confidence:.1%}). Visual patterns match the Food-101 class."
+            confidence_note = (
+                f"High uncalibrated model score ({top_confidence:.1%}). Visual patterns favor this Food-101 class; "
+                "this score is not a probability of correctness."
+            )
         elif top_confidence >= 0.30:
             confidence_tier = "moderate"
             is_uncertain = False
             predicted_label = top["label"]
-            confidence_note = f"Moderate provisional confidence ({top_confidence:.1%}). Alternative candidates in top 5 should be considered."
+            confidence_note = (
+                f"Moderate uncalibrated model score ({top_confidence:.1%}). Consider alternative top-5 classes; "
+                "this score is not a probability of correctness."
+            )
         else:
             confidence_tier = "low"
             is_uncertain = True
             predicted_label = "Uncertain / Unsupported Food"
             confidence_note = (
-                f"Low provisional confidence ({top_confidence:.1%} < 30.0%). The model cannot reliably classify this food. "
+                f"Low uncalibrated model score ({top_confidence:.1%} < 30.0%). The model cannot reliably classify this food. "
                 "Note: Food-101 covers 101 prepared restaurant dishes and cannot reliably recognize raw produce "
                 "(such as fresh apples, bananas, or raw vegetables), raw groceries, or non-food items. "
                 "Please use text query search for produce nutrition."
@@ -388,7 +402,7 @@ async def recognize_food(file: UploadFile = File(...)):
         if is_uncertain:
             nutrition = {
                 **nutrition,
-                "reliability_warning": "Nutrition is provisional based on low-confidence image match. Use text search for verified nutrition.",
+                "reliability_warning": "Nutrition is provisional because the model's uncalibrated score is low. Use text search for verified nutrition.",
             }
 
         # 3. Multi-dish spatial arrangement analysis (with conservative confidence)

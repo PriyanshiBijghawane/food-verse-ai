@@ -20,6 +20,7 @@ import {
   Settings,
   HelpCircle,
   Server,
+  History,
   Upload,
   Trash2,
   Image as ImageIcon,
@@ -30,6 +31,7 @@ import {
   Scale
 } from 'lucide-react'
 import FreshnessWorkspace from './FreshnessWorkspace'
+import HistoryWorkspace from './HistoryWorkspace'
 import HygieneWorkspace from './HygieneWorkspace'
 import CookingAssistantWorkspace from './CookingWorkspace'
 import MealPlannerWorkspace from './MealPlannerWorkspace'
@@ -44,22 +46,23 @@ const navItems = [
   { id: 'restaurant-hygiene', label: 'Restaurant Hygiene', icon: Store },
   { id: 'smart-cooking', label: 'Cooking Assistant', icon: ChefHat },
   { id: 'meal-planner', label: 'Meal Planner', icon: CalendarDays },
+  { id: 'history', label: 'History', icon: History },
 ]
 
 const modules = [
   {
     id: 'food-recognition',
     title: 'Food Recognition & Nutrition',
-    tag: 'Vision AI',
+    tag: 'Food-101 Vision',
     badgeClass: 'badge-blue',
     icon: ScanLine,
     description:
-      'Instantly recognize ingredients, estimate portion sizes, and calculate detailed macro and micronutrient profiles from a photo.',
-    features: ['Calorie Breakdown', 'Macro Analysis', 'Portion Estimation'],
+      'Classify prepared dishes with Food-101 and review ranked classes using uncalibrated model scores.',
+    features: ['Food-101 Classification', 'Top Predictions', 'Nutrition Reference Estimates'],
     actionText: 'Analyze Dish',
     endpoint: 'POST /api/v1/food/recognize',
     details:
-      'This module is prepared to accept image uploads and camera feeds to classify dishes, estimate portion volumes, and compute total calories, proteins, carbohydrates, and fats via nutritional knowledge graphs.',
+      'Returns the model prediction and uncalibrated class scores, not probabilities of correctness. Nutrition is a separate reference estimate; Food-101 does not detect ingredients or estimate portion size.',
   },
   {
     id: 'freshness-detection',
@@ -68,12 +71,12 @@ const modules = [
     badgeClass: 'badge-emerald',
     icon: Leaf,
     description:
-      'Detect spoilage risks, monitor shelf-life projections, and receive actionable preservation advice powered by multi-spectral models.',
-    features: ['Spoilage Detection', 'Expiry Projection', 'Storage Tips'],
+      'Review visible color and texture cues with transparent computer-vision heuristics and conservative food-safety guidance.',
+    features: ['Visible Spoilage Cues', 'Freshness Assessment', 'Safety Limitations'],
     actionText: 'Check Freshness',
     endpoint: 'POST /api/v1/food/freshness',
     details:
-      'This module will process produce and ingredient imagery alongside storage conditions to detect surface discoloration, estimate shelf-life countdowns, and generate preservation warnings.',
+      'This endpoint measures visible image features and reports its active analysis mode. A visual assessment cannot determine microbial safety or guarantee an item is safe to eat.',
   },
   {
     id: 'restaurant-hygiene',
@@ -82,26 +85,26 @@ const modules = [
     badgeClass: 'badge-amber',
     icon: Store,
     description:
-      'Evaluate cleanliness standards, cross-contamination hazards, and food prep safety compliance through automated visual auditing.',
-    features: ['Sanitation Score', 'Compliance Alerts', 'Safety Audit'],
+      'Review visible kitchen conditions with the configured inspection engine, including local visual heuristics when no vision model is available.',
+    features: ['Visible Condition Review', 'Inspection Findings', 'Human Review Guidance'],
     actionText: 'Inspect Space',
     endpoint: 'POST /api/v1/hygiene/audit',
     details:
-      'This module will perform automated visual inspection of kitchen prep counters, sanitation zones, refrigeration temperature compliance, and food safety protocols to generate audit scorecards.',
+      'This endpoint assesses observable conditions in the uploaded image or sampled video frames. It does not measure temperatures or certify regulatory compliance; the active inspection engine is shown in results.',
   },
   {
     id: 'smart-cooking',
     title: 'Smart Cooking Assistant',
-    tag: 'Interactive AI',
+    tag: 'Recipe Guidance',
     badgeClass: 'badge-orange',
     icon: ChefHat,
     description:
-      'Get guided interactive cooking guidance, smart ingredient substitutions, culinary technique tips, and hands-free voice commands.',
+      'Generate structured recipe guidance from ingredients you enter, with the active recipe engine and fallback mode disclosed.',
     features: ['Step-by-Step Cooking', 'Smart Substitutions', 'Technique Guide'],
     actionText: 'Start Cooking',
     endpoint: 'POST /api/v1/cooking/assistant',
     details:
-      'This module will provide interactive step-by-step guidance, dynamic ingredient swaps based on pantry inventory, culinary timers, and technique recommendations tailored to cooking skill.',
+      'Generates structured recipes from text ingredients. The optional Food-101 image model classifies prepared dishes and is not an ingredient detector; rule-based recipe output is identified as such.',
   },
   {
     id: 'meal-planner',
@@ -110,17 +113,17 @@ const modules = [
     badgeClass: 'badge-purple',
     icon: CalendarDays,
     description:
-      'Generate weekly nutrient-balanced schedules matching specific biometric goals, dietary preferences, and pantry inventories.',
-    features: ['Automated Schedule', 'Pantry Matching', 'Goal Tracking'],
+      'Generate deterministic weekly schedules from biometric targets, dietary preferences, and food restrictions.',
+    features: ['Seven-Day Schedule', 'Nutrition Targets', 'Dietary Restrictions'],
     actionText: 'Generate Plan',
     endpoint: 'POST /api/v1/meal-plan/generate',
     details:
-      'This module will synthesize 7-day personalized meal plans tailored to biometric targets, dietary restrictions (vegan, keto, gluten-free), and pantry availability with automated grocery lists.',
+      'Calculates nutrition targets and builds a seven-day schedule from the supplied profile and dietary restrictions. The planner is rule-based, not a generative AI model.',
   },
 ]
 
 export default function App() {
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001'
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -316,10 +319,26 @@ export default function App() {
 
   const handleImageFile = (file) => {
     if (!file) return
+    let validationMessage = null
     if (!file.type.startsWith('image/')) {
-      setImageError('Please select a valid image file (PNG, JPG, JPEG, WEBP).')
+      validationMessage = 'Please select a valid image file (PNG, JPG, JPEG, or WEBP).'
+    } else if (file.size === 0) {
+      validationMessage = 'The selected image is empty. Choose another image.'
+    } else if (file.size > 25 * 1024 * 1024) {
+      validationMessage = 'Image size exceeds the 25 MB upload limit.'
+    }
+
+    if (validationMessage) {
+      if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl)
+      setSelectedImage(null)
+      setImageError(validationMessage)
+      setAnalysisResult(null)
+      setAnalysisError(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
+
+    if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl)
     setImageError(null)
     setAnalysisResult(null)
     setAnalysisError(null)
@@ -384,22 +403,56 @@ export default function App() {
         body: formData,
       })
 
-      const data = await response.json()
+      let data
+      try {
+        data = await response.json()
+      } catch {
+        data = null
+      }
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Analysis request failed.')
+        const detail = Array.isArray(data?.detail)
+          ? data.detail.map((issue) => issue.msg || JSON.stringify(issue)).join('; ')
+          : data?.detail
+        throw new Error(detail || `Food analysis failed (HTTP ${response.status}).`)
+      }
+
+      const validPredictions =
+        Array.isArray(data?.top_5) &&
+        data.top_5.length > 0 &&
+        data.top_5.every(
+          (prediction) =>
+            typeof prediction?.label === 'string' &&
+            Number.isFinite(prediction.confidence) &&
+            prediction.confidence >= 0 &&
+            prediction.confidence <= 1
+        )
+      if (
+        data?.status !== 'success' ||
+        typeof data.predicted_label !== 'string' ||
+        !Number.isFinite(data.confidence) ||
+        data.confidence < 0 ||
+        data.confidence > 1 ||
+        !validPredictions
+      ) {
+        throw new Error('The food recognition API returned an unexpected response. Please try again or check the backend version.')
       }
 
       setAnalysisResult(data)
+      const resultMessage = data.is_uncertain
+        ? `The model is uncertain. Its best candidate is "${data.candidate_label}" (uncalibrated score ${(data.confidence * 100).toFixed(1)}%).`
+        : `Predicted "${data.predicted_label}" (uncalibrated score ${(data.confidence * 100).toFixed(1)}%).`
       addNotification({
         id: `food-${Date.now()}`,
         title: 'Food Recognition Complete',
-        message: `Identified "${data.predicted_label}" with ${(data.confidence * 100).toFixed(1)}% confidence.`,
+        message: resultMessage,
         type: 'success',
         module: 'food-recognition'
       })
     } catch (err) {
-      const errMsg = err.message || 'Unable to connect to the backend server.'
+      const errMsg = err instanceof TypeError
+        ? `Cannot reach the Food Verse API at ${apiBaseUrl}. Confirm the backend is running and allows requests from ${window.location.origin}.`
+        : err.message || 'Food analysis failed unexpectedly.'
       setAnalysisError(errMsg)
       addNotification({
         id: `food-err-${Date.now()}`,
@@ -1115,7 +1168,9 @@ export default function App() {
                             maxWidth: '620px',
                             padding: '24px 24px 20px',
                             background: 'var(--color-surface)',
-                            border: '1px solid rgba(16, 185, 129, 0.35)',
+                            border: analysisResult.is_uncertain
+                              ? '1px solid rgba(217, 119, 6, 0.35)'
+                              : '1px solid rgba(16, 185, 129, 0.35)',
                             borderRadius: 'var(--radius-md)',
                             boxShadow: 'var(--shadow-md)',
                             display: 'flex',
@@ -1126,25 +1181,31 @@ export default function App() {
                           {/* Header row */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <CheckCircle2 size={20} color="#059669" />
+                              {analysisResult.is_uncertain
+                                ? <AlertCircle size={20} color="#b45309" />
+                                : <CheckCircle2 size={20} color="#059669" />}
                               <span style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--color-primary-800)' }}>
-                                {analysisResult.is_multi_item ? 'Multi-Dish Recognition' : 'Recognition Result'}
+                                {analysisResult.is_uncertain
+                                  ? 'Uncertain Prediction'
+                                  : analysisResult.is_multi_item
+                                  ? 'Multi-Region Candidates'
+                                  : 'Recognition Result'}
                               </span>
                             </div>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                               {analysisResult.is_multi_item && (
                                 <span className="card-badge badge-blue">
-                                  {analysisResult.detected_items.length} Dishes Detected
+                                  {analysisResult.detected_items.length} Region Candidates
                                 </span>
                               )}
-                              <span className="card-badge badge-emerald">
-                                {analysisResult.status}
+                              <span className={`card-badge ${analysisResult.is_uncertain ? 'badge-amber' : 'badge-emerald'}`}>
+                                {analysisResult.confidence_tier} uncalibrated score
                               </span>
                             </div>
                           </div>
 
                           {/* Complex Food Arrangement Multi-Item Breakdown */}
-                          {analysisResult.is_multi_item && analysisResult.detected_items && analysisResult.detected_items.length >= 2 && (
+                          {analysisResult.is_multi_item && analysisResult.detected_items?.length > 0 && (
                             <div
                               style={{
                                 background: '#f8fafc',
@@ -1160,11 +1221,11 @@ export default function App() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <UtensilsCrossed size={16} color="var(--color-primary-700)" />
                                   <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-primary-900)' }}>
-                                    Detected Arrangement Dishes ({analysisResult.detected_items.length})
+                                    Additional Model Candidates ({analysisResult.detected_items.length})
                                   </span>
                                 </div>
                                 <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
-                                  Spatial Zone Decomposition
+                                  Crop-level classifications, not object detections
                                 </span>
                               </div>
 
@@ -1207,7 +1268,7 @@ export default function App() {
                                           </span>
                                         )}
                                         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#059669' }}>
-                                          {(item.confidence * 100).toFixed(1)}% match
+                                          {(item.confidence * 100).toFixed(1)}% uncalibrated score
                                         </span>
                                       </div>
                                     </div>
@@ -1238,7 +1299,7 @@ export default function App() {
                               </div>
 
                               <div style={{ fontSize: '0.70rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                                * Multi-dish analysis sampled distinct spatial zones across this arrangement. Overlapping regions have been deduplicated to prevent double-counting.
+                                * Overlapping image regions are classified independently. These uncalibrated class scores do not verify separate objects or count dishes.
                               </div>
                             </div>
                           )}
@@ -1255,14 +1316,39 @@ export default function App() {
                             }}>
                               {analysisResult.predicted_label}
                             </span>
+                            {analysisResult.is_uncertain && analysisResult.candidate_label && (
+                              <div style={{ marginTop: '6px', fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
+                                Best model candidate: <strong>{analysisResult.candidate_label}</strong>
+                              </div>
+                            )}
                             <span style={{
                               display: 'inline-block',
                               fontSize: '1rem',
                               fontWeight: 600,
-                              color: '#059669',
+                              color: analysisResult.is_uncertain ? '#b45309' : '#059669',
                             }}>
-                              {(analysisResult.confidence * 100).toFixed(1)}% confidence
+                              {(analysisResult.confidence * 100).toFixed(1)}% model score
                             </span>
+                            <p style={{
+                              maxWidth: '520px',
+                              margin: '5px auto 0',
+                              fontSize: '0.72rem',
+                              color: 'var(--color-text-muted)',
+                              lineHeight: 1.4,
+                            }}>
+                              Uncalibrated Food-101 class score, not a probability of correctness. The model selects among its 101 trained dish classes.
+                            </p>
+                            {analysisResult.confidence_note && (
+                              <p style={{
+                                maxWidth: '520px',
+                                margin: '8px auto 0',
+                                fontSize: '0.78rem',
+                                color: analysisResult.is_uncertain ? '#92400e' : 'var(--color-text-secondary)',
+                                lineHeight: 1.45,
+                              }}>
+                                {analysisResult.confidence_note}
+                              </p>
+                            )}
                             {/* Confidence bar */}
                             <div style={{
                               marginTop: '10px',
@@ -1286,7 +1372,7 @@ export default function App() {
                           </div>
 
                           {/* Top-5 predictions */}
-                          {analysisResult.top_5 && analysisResult.top_5.length > 1 && (
+                          {analysisResult.top_5?.length > 0 && (
                             <div>
                               <span style={{
                                 display: 'block',
@@ -1297,8 +1383,11 @@ export default function App() {
                                 letterSpacing: '0.04em',
                                 marginBottom: '10px',
                               }}>
-                                Top Predictions
+                                {analysisResult.top_5.length > 1 ? 'Top Food-Class Scores' : 'Food-Class Score'}
                               </span>
+                              <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
+                                Uncalibrated model scores; candidates are not verified ingredients or separate food-object detections.
+                              </p>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                 {analysisResult.top_5.map((pred, idx) => (
                                   <div key={idx} style={{
@@ -1360,6 +1449,19 @@ export default function App() {
                                 gap: '12px',
                               }}
                             >
+                              {analysisResult.nutrition.reliability_warning && (
+                                <div style={{
+                                  padding: '9px 11px',
+                                  background: '#fffbeb',
+                                  border: '1px solid #fcd34d',
+                                  borderRadius: '6px',
+                                  color: '#92400e',
+                                  fontSize: '0.78rem',
+                                  lineHeight: 1.45,
+                                }}>
+                                  {analysisResult.nutrition.reliability_warning}
+                                </div>
+                              )}
                               {/* Nutrition Header */}
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1704,17 +1806,17 @@ export default function App() {
                         letterSpacing: '0.04em',
                       }}
                     >
-                      Planned Pipeline Capabilities
+                      Available Results
                     </span>
                     <div className="card-features">
                       <span className="feature-pill" style={{ padding: '6px 12px' }}>
-                        ✓ Calorie Breakdown
+                        ✓ Food-101 dish classification
                       </span>
                       <span className="feature-pill" style={{ padding: '6px 12px' }}>
-                        ✓ Macro Analysis (Carbs, Protein, Fat)
+                        ✓ Ranked class predictions with uncalibrated scores
                       </span>
                       <span className="feature-pill" style={{ padding: '6px 12px' }}>
-                        ✓ Portion Volume Estimation
+                        ✓ Reference nutrition estimate (not portion detection)
                       </span>
                     </div>
                   </div>
@@ -1749,6 +1851,8 @@ export default function App() {
               userSettings={userSettings}
               onNotification={addNotification}
             />
+          ) : activeTab === 'history' ? (
+            <HistoryWorkspace apiBaseUrl={apiBaseUrl} />
           ) : activeTab === 'profile' ? (
             <ProfileWorkspace
               apiBaseUrl={apiBaseUrl}

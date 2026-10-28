@@ -16,7 +16,7 @@ import {
   XCircle
 } from 'lucide-react'
 
-export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' }) {
+export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8001' }) {
   const [selectedFile, setSelectedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [mediaType, setMediaType] = useState('image') // 'image' or 'video'
@@ -125,11 +125,11 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
         <div className="welcome-content">
           <div className="welcome-tag">
             <Sparkles size={14} />
-            <span>Commercial Kitchen Safety & Sanitation Audit</span>
+            <span>Visual Kitchen Hygiene Screening</span>
           </div>
           <h1 className="welcome-title">Restaurant Hygiene Monitoring</h1>
           <p className="welcome-description">
-            Automated visual inspection of kitchen prep counters, sanitation zones, food handling compliance, and cross-contamination hazards.
+            Visual screening for selected, observable sanitation indicators. It cannot certify regulatory compliance or detect invisible contamination.
           </p>
         </div>
 
@@ -140,9 +140,9 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
             </div>
             <div className="metric-data">
               <span className="metric-value">
-                {isAnalyzing ? 'Auditing...' : result ? `${result.compliance_score}/100` : selectedFile ? 'Ready' : 'Awaiting'}
+                {isAnalyzing ? 'Screening...' : result ? `${result.compliance_score}/100` : selectedFile ? 'Ready' : 'Awaiting'}
               </span>
-              <span className="metric-label">Compliance Score</span>
+              <span className="metric-label">Visual Indicator Score</span>
             </div>
           </div>
 
@@ -152,9 +152,15 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
             </div>
             <div className="metric-data">
               <span className="metric-value">
-                {result ? result.audit_status : 'Multi-Frame Inspection'}
+                {result
+                  ? result.audit_status === 'Compliant'
+                    ? 'No listed indicators flagged'
+                    : result.audit_status === 'Non-Compliant'
+                      ? 'Indicators flagged'
+                      : result.audit_status
+                  : 'Multi-Frame Inspection'}
               </span>
-              <span className="metric-label">Audit Rating</span>
+              <span className="metric-label">Visual Screening Status</span>
             </div>
           </div>
         </div>
@@ -166,7 +172,7 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
           <div>
             <h2 className="section-title">Kitchen Image or Video Footage Upload</h2>
             <p className="section-subtitle">
-              Upload kitchen photos or recorded video clips for automated frame sampling and indicator auditing.
+              Upload images or video for frame sampling. Findings are visual indicators, not a hygiene certification or definitive safety assessment.
             </p>
           </div>
           <span className="card-badge badge-amber">Vision Inspection</span>
@@ -294,12 +300,12 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
                       {isAnalyzing ? (
                         <>
                           <Loader2 size={16} className="animate-spin" />
-                          <span>Extracting & Auditing Frames...</span>
+                          <span>Sampling Frames...</span>
                         </>
                       ) : (
                         <>
                           <Store size={16} />
-                          <span>Run Hygiene Audit</span>
+                          <span>Run Visual Screening</span>
                         </>
                       )}
                     </button>
@@ -371,7 +377,7 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
             </div>
           )}
 
-          {/* Audit Results Presentation */}
+          {/* Visual screening results */}
           {result && (
             <div
               style={{
@@ -399,10 +405,10 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
               >
                 <div>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Audit Reference: {result.audit_id}
+                    Screening Reference: {result.audit_id}
                   </span>
                   <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--color-primary-900)' }}>
-                    Commercial Kitchen Hygiene Audit
+                    Kitchen Visual Screening
                   </h3>
                   <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                     Engine: <strong>{result.inspection_engine}</strong> | Analyzed Frames: <strong>{result.frames_analyzed}</strong>
@@ -423,7 +429,7 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
                           : 'badge-orange'
                       }`}
                     >
-                      {result.audit_status}
+                      {result.audit_status === 'Compliant' ? 'No listed indicators' : result.audit_status}
                     </span>
                   </div>
 
@@ -449,10 +455,14 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
                 </div>
               </div>
 
+              <div style={{ fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--radius-sm)', padding: '11px 13px' }}>
+                <strong>Visual screening only:</strong> The displayed engine identifies the analysis method (including rule-based surface heuristics when active). Scores and findings are not a certified inspection and cannot detect invisible pathogens or conditions outside sampled frames.
+              </div>
+
               {/* Executive Summary */}
               <div style={{ background: '#ffffff', padding: '16px', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(22, 62, 48, 0.08)' }}>
                 <h4 style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-primary-900)', marginBottom: '6px' }}>
-                  Auditor Executive Summary
+                Visual Screening Summary
                 </h4>
                 <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
                   {result.ai_summary}
@@ -468,7 +478,7 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
                 {!result.violations || result.violations.length === 0 ? (
                   <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: 'var(--radius-sm)', border: '1px solid #bbf7d0', color: '#166534', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <CheckCircle2 size={18} />
-                    <span>No observable violations or gross contamination detected in inspected frames.</span>
+                    <span>No listed visual indicators were flagged in the sampled frames. This does not establish that the kitchen is clean or free of contamination.</span>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -543,7 +553,7 @@ export default function HygieneWorkspace({ apiBaseUrl = 'http://127.0.0.1:8000' 
                   borderLeft: '3px solid var(--color-accent-amber)',
                 }}
               >
-                {result.disclaimer}
+                <strong>Method and limitations:</strong> {result.inspection_engine} examines sampled visual evidence only. A score of {result.compliance_score}/100 is not a regulatory compliance rating. Invisible pathogens, chemical residues, and conditions outside the sampled frames cannot be assessed. {result.disclaimer}
               </div>
             </div>
           )}

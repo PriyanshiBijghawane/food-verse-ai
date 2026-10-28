@@ -33,6 +33,19 @@ def test_health_endpoint_metadata():
     assert data["model_id"] == "nateraw/food"
 
 
+def test_frontend_dev_origin_is_allowed_by_cors():
+    resp = client.options(
+        "/api/v1/food/recognize",
+        headers={
+            "Origin": "http://localhost:5174",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:5174"
+
+
 def test_health_when_model_unavailable():
     original_ready = main._model_ready
     original_error = main._model_error
@@ -71,6 +84,21 @@ def test_recognize_when_model_unavailable_returns_503():
         main._model_ready = original_ready
         main._model_error = original_error
         main._model = original_model
+
+
+def test_recognize_rejects_uploads_over_configured_limit(monkeypatch):
+    original_ready = main._model_ready
+    main._model_ready = True
+    monkeypatch.setattr(main.settings, "MAX_UPLOAD_MB", 1)
+    try:
+        resp = client.post(
+            "/api/v1/food/recognize",
+            files={"file": ("large.jpg", b"x" * (1024 * 1024 + 1), "image/jpeg")},
+        )
+        assert resp.status_code == 413
+        assert "maximum upload size of 1 MB" in resp.json()["detail"]
+    finally:
+        main._model_ready = original_ready
 
 
 def test_nutrition_lookup():
