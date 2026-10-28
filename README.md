@@ -57,19 +57,14 @@ Backend endpoints:
 
 ### Render Backend Deployment (CPU)
 
-In the Render web service settings, set the **Root Directory** to `backend` and add the environment variable `PYTHON_VERSION=3.10.10`. Set the **Build Command** to:
+Use the repository's `render.yaml` Blueprint settings, or apply the same values to the existing Render web service:
 
-```sh
-python -m pip install --no-cache-dir -r requirements-render.txt
-```
+- **Root Directory:** `backend`
+- **Environment variable:** `PYTHON_VERSION=3.10.10`
+- **Build Command:** `python -m pip install --no-cache-dir -r requirements-render.txt && python verify_render_install.py`
+- **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`
 
-and the **Start Command** to:
-
-```sh
-uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
-```
-
-The Render lock file pins the Python dependencies and installs CPU-only PyTorch and TorchVision. One worker prevents multiple app processes from each loading another copy of Food-101. The application currently loads the single `nateraw/food` classifier during startup. Its full-precision weights are about 328 MiB before Python, framework, and inference memory are included, so a 512 MiB runtime is not a reliable fit; use an instance with more memory if startup or inference still exceeds the limit.
+The Render requirements pin the Python dependencies and reference exact CPython 3.10 Linux x86_64 CPU-only PyTorch wheels. The build-time import check fails if runtime modules are missing or a CUDA-enabled PyTorch build is installed. One worker prevents multiple application processes from each loading another copy of Food-101. The classifier remains loaded at startup for real inference. Its full-precision weights are about 328 MiB before Python, framework, and inference memory are included, so a 512 MiB runtime is not a reliable fit; use an instance with more memory if startup or inference still exceeds the limit.
 
 ---
 
