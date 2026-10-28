@@ -8,4 +8,4 @@ transformers
 opencv-python-headless
 httpx
 pytest
-
+SQLAlchemy
