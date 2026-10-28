@@ -216,3 +216,136 @@ class TestErrorHandling:
         img.save(buf, format="JPEG")
         with pytest.raises(ValueError, match="Image too small"):
             _validate_and_decode(buf.getvalue())
+
+
+# ===========================================================================
+# 8.  Realistic edge cases (Epic 3 investigation)
+# ===========================================================================
+
+class TestRealisticEdgeCases:
+
+    def test_realistic_shaded_white_plate_is_inconclusive(self):
+        """Clean white plate with subtle radial shading must not be marked Spoiled."""
+        h, w = 200, 200
+        y, x = np.ogrid[:h, :w]
+        plate = 240 - 20 * ((x - 100)**2 + (y - 100)**2) / (100**2 + 100**2)
+        plate = np.stack([plate, plate, plate - 5], axis=-1).astype(np.uint8)
+        raw = _to_jpeg(Image.fromarray(plate, "RGB"))
+        feats, score, label, safety, _ = _analyse(raw, "generic")
+        assert feats["low_information"] is True
+        assert score == -1
+        assert label == "Inconclusive"
+        assert safety == "unable_to_assess"
+
+    def test_fruit_with_partial_brown_rot_is_spoiled(self):
+        """A fruit with 25% brown rot lesion must be classified as Spoiled, not Moderate."""
+        fruit = np.zeros((200, 200, 3), dtype=np.uint8)
+        fruit[:, :] = [200, 40, 40]   # vivid red surface
+        fruit[:50, :] = [90, 50, 20]   # 25% deep brown rot lesion
+        raw = _to_jpeg(Image.fromarray(fruit, "RGB"))
+        feats, score, label, safety, signs = _analyse(raw, "fruit")
+        assert feats["brown_rot_fraction"] >= 0.20
+        assert label == "Spoiled"
+        assert score < 45
+        assert safety == "do_not_consume"
+        assert any("rot" in s.lower() or "decay" in s.lower() for s in signs)
+
+
+# ===========================================================================
+# 9. Phase 5: Freshness Pipeline, Status, Model Manager & Honest Disclosures
+# ===========================================================================
+
+class TestPhase5FreshnessPipeline:
+
+    def test_freshness_status_endpoint(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+
+        resp = client.get("/api/v1/food/freshness/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "model_loaded" in data
+        assert "model_id" in data
+        assert "analysis_mode" in data
+        assert "limitations_notice" in data
+        assert "Salmonella" in data["limitations_notice"]
+
+    def test_freshness_endpoint_returns_honest_disclosure_and_visual_evidence(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+
+        # Fresh tomato-like image
+        arr = np.zeros((100, 100, 3), dtype=np.uint8)
+        arr[:, :] = [200, 50, 40]
+        raw = _to_jpeg(Image.fromarray(arr, "RGB"))
+
+        resp = client.post(
+            "/api/v1/food/freshness",
+            files={"file": ("tomato.jpg", raw, "image/jpeg")},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert "model_id" in data
+        assert "analysis_mode" in data
+        assert data["analysis_mode"] in ("heuristic_visual_cues", "deep_learning_model")
+        assert "visual_evidence" in data
+        assert "browning_detected" in data["visual_evidence"]
+        assert "mold_detected" in data["visual_evidence"]
+        assert "limitations" in data
+        assert any("microbial" in lim.lower() for lim in data["limitations"])
+        assert "pipeline_disclosure" in data
+
+    def test_freshness_model_manager_load_and_unload(self, tmp_path):
+        import json
+        import torch
+        import torch.nn as nn
+        from torchvision import models
+        from routers.freshness_detector import freshness_manager
+
+        # Create dummy MobileNetV3 freshness checkpoint
+        model = models.mobilenet_v3_small(weights=None)
+        in_features = model.classifier[3].in_features
+        model.classifier[3] = nn.Linear(in_features, 2)
+
+        ckpt_path = tmp_path / "freshness_test.pt"
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "backbone": "mobilenet_v3_small",
+            "num_classes": 2,
+        }, ckpt_path)
+
+        mapping_path = tmp_path / "class_mapping.json"
+        mapping_path.write_text(json.dumps({
+            "id2label": {"0": "fresh", "1": "spoiled"},
+            "label2id": {"fresh": 0, "spoiled": 1},
+        }))
+
+        try:
+            loaded = freshness_manager.load_model(ckpt_path, mapping_path, device="cpu")
+            assert loaded is True
+            assert freshness_manager.is_model_loaded is True
+            assert freshness_manager.analysis_mode == "deep_learning_model"
+            assert "mobilenet_v3" in freshness_manager.model_id
+
+            # Predict on a test image
+            test_img = Image.new("RGB", (100, 100), color=(50, 150, 50))
+            pred = freshness_manager.predict(test_img)
+            assert pred is not None
+            assert pred["predicted_class"] in ("fresh", "spoiled")
+            assert 0.0 <= pred["confidence"] <= 1.0
+            assert "class_probabilities" in pred
+
+        finally:
+            freshness_manager.unload_model()
+            assert freshness_manager.is_model_loaded is False
+            assert freshness_manager.analysis_mode == "heuristic_visual_cues"
+
+    def test_freshness_model_manager_missing_files_raises(self):
+        from routers.freshness_detector import freshness_manager
+        with pytest.raises(FileNotFoundError, match="Checkpoint not found"):
+            freshness_manager.load_model("nonexistent_path_123.pt", "mapping.json")
+

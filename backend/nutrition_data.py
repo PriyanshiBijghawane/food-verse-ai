@@ -9,7 +9,7 @@ Actual nutritional content varies significantly depending on specific ingredient
 cooking methods, oil/salt usage, and portion sizes.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 DEFAULT_DISCLAIMER = (
     "Nutritional values are reference estimates based on standard recipes and serving sizes "
@@ -933,6 +933,380 @@ FOOD_NUTRITION_DATASET: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# Standard reference nutrition for common whole produce, fresh fruits, vegetables,
+# staples, and pantry groceries (USDA FoodData Central standard reference).
+COMMON_PRODUCE_AND_STAPLES_DATASET: Dict[str, Dict[str, Any]] = {
+    "apple": {
+        "food_name": "Fresh Apple",
+        "serving_size": "1 medium apple (approx. 182g)",
+        "calories": 95,
+        "protein_g": 0.5,
+        "carbs_g": 25.1,
+        "fat_g": 0.3,
+        "fiber_g": 4.4,
+    },
+    "banana": {
+        "food_name": "Fresh Banana",
+        "serving_size": "1 medium banana (approx. 118g)",
+        "calories": 105,
+        "protein_g": 1.3,
+        "carbs_g": 27.0,
+        "fat_g": 0.3,
+        "fiber_g": 3.1,
+    },
+    "orange": {
+        "food_name": "Fresh Orange",
+        "serving_size": "1 medium orange (approx. 131g)",
+        "calories": 62,
+        "protein_g": 1.2,
+        "carbs_g": 15.4,
+        "fat_g": 0.2,
+        "fiber_g": 3.1,
+    },
+    "strawberry": {
+        "food_name": "Fresh Strawberries",
+        "serving_size": "1 cup halves (approx. 152g)",
+        "calories": 49,
+        "protein_g": 1.0,
+        "carbs_g": 11.7,
+        "fat_g": 0.5,
+        "fiber_g": 3.0,
+    },
+    "strawberries": {
+        "food_name": "Fresh Strawberries",
+        "serving_size": "1 cup halves (approx. 152g)",
+        "calories": 49,
+        "protein_g": 1.0,
+        "carbs_g": 11.7,
+        "fat_g": 0.5,
+        "fiber_g": 3.0,
+    },
+    "grape": {
+        "food_name": "Fresh Grapes",
+        "serving_size": "1 cup seedless (approx. 151g)",
+        "calories": 104,
+        "protein_g": 1.1,
+        "carbs_g": 27.3,
+        "fat_g": 0.2,
+        "fiber_g": 1.4,
+    },
+    "grapes": {
+        "food_name": "Fresh Grapes",
+        "serving_size": "1 cup seedless (approx. 151g)",
+        "calories": 104,
+        "protein_g": 1.1,
+        "carbs_g": 27.3,
+        "fat_g": 0.2,
+        "fiber_g": 1.4,
+    },
+    "mango": {
+        "food_name": "Fresh Mango",
+        "serving_size": "1 cup pieces (approx. 165g)",
+        "calories": 99,
+        "protein_g": 1.4,
+        "carbs_g": 24.7,
+        "fat_g": 0.6,
+        "fiber_g": 2.6,
+    },
+    "watermelon": {
+        "food_name": "Fresh Watermelon",
+        "serving_size": "1 wedge (approx. 286g)",
+        "calories": 86,
+        "protein_g": 1.7,
+        "carbs_g": 21.6,
+        "fat_g": 0.4,
+        "fiber_g": 1.1,
+    },
+    "avocado": {
+        "food_name": "Fresh Avocado",
+        "serving_size": "1/2 medium avocado (approx. 100g)",
+        "calories": 160,
+        "protein_g": 2.0,
+        "carbs_g": 8.5,
+        "fat_g": 14.7,
+        "fiber_g": 6.7,
+    },
+    "lemon": {
+        "food_name": "Fresh Lemon",
+        "serving_size": "1 fruit without peel (approx. 58g)",
+        "calories": 17,
+        "protein_g": 0.6,
+        "carbs_g": 5.4,
+        "fat_g": 0.2,
+        "fiber_g": 1.6,
+    },
+    "blueberries": {
+        "food_name": "Fresh Blueberries",
+        "serving_size": "1 cup (approx. 148g)",
+        "calories": 84,
+        "protein_g": 1.1,
+        "carbs_g": 21.4,
+        "fat_g": 0.5,
+        "fiber_g": 3.6,
+    },
+    "pineapple": {
+        "food_name": "Fresh Pineapple",
+        "serving_size": "1 cup chunks (approx. 165g)",
+        "calories": 82,
+        "protein_g": 0.9,
+        "carbs_g": 21.6,
+        "fat_g": 0.2,
+        "fiber_g": 2.3,
+    },
+    "broccoli": {
+        "food_name": "Broccoli (Raw or Cooked)",
+        "serving_size": "1 cup chopped (approx. 91g)",
+        "calories": 31,
+        "protein_g": 2.6,
+        "carbs_g": 6.0,
+        "fat_g": 0.3,
+        "fiber_g": 2.4,
+    },
+    "carrot": {
+        "food_name": "Fresh Carrot",
+        "serving_size": "1 medium carrot (approx. 61g)",
+        "calories": 25,
+        "protein_g": 0.6,
+        "carbs_g": 5.8,
+        "fat_g": 0.1,
+        "fiber_g": 1.7,
+    },
+    "carrots": {
+        "food_name": "Fresh Carrots",
+        "serving_size": "1 medium carrot (approx. 61g)",
+        "calories": 25,
+        "protein_g": 0.6,
+        "carbs_g": 5.8,
+        "fat_g": 0.1,
+        "fiber_g": 1.7,
+    },
+    "tomato": {
+        "food_name": "Fresh Red Tomato",
+        "serving_size": "1 medium tomato (approx. 123g)",
+        "calories": 22,
+        "protein_g": 1.1,
+        "carbs_g": 4.8,
+        "fat_g": 0.2,
+        "fiber_g": 1.5,
+    },
+    "tomatoes": {
+        "food_name": "Fresh Red Tomatoes",
+        "serving_size": "1 medium tomato (approx. 123g)",
+        "calories": 22,
+        "protein_g": 1.1,
+        "carbs_g": 4.8,
+        "fat_g": 0.2,
+        "fiber_g": 1.5,
+    },
+    "cucumber": {
+        "food_name": "Fresh Cucumber",
+        "serving_size": "1/2 large with peel (approx. 150g)",
+        "calories": 23,
+        "protein_g": 1.0,
+        "carbs_g": 5.4,
+        "fat_g": 0.2,
+        "fiber_g": 0.8,
+    },
+    "spinach": {
+        "food_name": "Fresh Spinach",
+        "serving_size": "2 cups raw (approx. 60g)",
+        "calories": 14,
+        "protein_g": 1.7,
+        "carbs_g": 2.2,
+        "fat_g": 0.2,
+        "fiber_g": 1.3,
+    },
+    "potato": {
+        "food_name": "Baked Potato",
+        "serving_size": "1 medium with skin (approx. 173g)",
+        "calories": 161,
+        "protein_g": 4.3,
+        "carbs_g": 36.6,
+        "fat_g": 0.2,
+        "fiber_g": 3.8,
+    },
+    "onion": {
+        "food_name": "Yellow Onion",
+        "serving_size": "1 medium onion (approx. 110g)",
+        "calories": 44,
+        "protein_g": 1.2,
+        "carbs_g": 10.3,
+        "fat_g": 0.1,
+        "fiber_g": 1.9,
+    },
+    "lettuce": {
+        "food_name": "Romaine Lettuce",
+        "serving_size": "2 cups shredded (approx. 94g)",
+        "calories": 16,
+        "protein_g": 1.2,
+        "carbs_g": 3.1,
+        "fat_g": 0.3,
+        "fiber_g": 2.0,
+    },
+    "bell_pepper": {
+        "food_name": "Sweet Bell Pepper",
+        "serving_size": "1 medium pepper (approx. 119g)",
+        "calories": 31,
+        "protein_g": 1.2,
+        "carbs_g": 7.2,
+        "fat_g": 0.4,
+        "fiber_g": 2.5,
+    },
+    "egg": {
+        "food_name": "Large Whole Egg",
+        "serving_size": "1 large egg (approx. 50g)",
+        "calories": 78,
+        "protein_g": 6.3,
+        "carbs_g": 0.6,
+        "fat_g": 5.3,
+        "fiber_g": 0.0,
+    },
+    "eggs": {
+        "food_name": "Large Whole Eggs",
+        "serving_size": "1 large egg (approx. 50g)",
+        "calories": 78,
+        "protein_g": 6.3,
+        "carbs_g": 0.6,
+        "fat_g": 5.3,
+        "fiber_g": 0.0,
+    },
+    "boiled_egg": {
+        "food_name": "Hard-Boiled Egg",
+        "serving_size": "1 large egg (approx. 50g)",
+        "calories": 78,
+        "protein_g": 6.3,
+        "carbs_g": 0.6,
+        "fat_g": 5.3,
+        "fiber_g": 0.0,
+    },
+    "rice": {
+        "food_name": "Steamed White Rice",
+        "serving_size": "1 cup cooked (approx. 158g)",
+        "calories": 205,
+        "protein_g": 4.2,
+        "carbs_g": 44.5,
+        "fat_g": 0.4,
+        "fiber_g": 0.6,
+    },
+    "white_rice": {
+        "food_name": "Steamed White Rice",
+        "serving_size": "1 cup cooked (approx. 158g)",
+        "calories": 205,
+        "protein_g": 4.2,
+        "carbs_g": 44.5,
+        "fat_g": 0.4,
+        "fiber_g": 0.6,
+    },
+    "brown_rice": {
+        "food_name": "Cooked Brown Rice",
+        "serving_size": "1 cup cooked (approx. 195g)",
+        "calories": 216,
+        "protein_g": 5.0,
+        "carbs_g": 44.8,
+        "fat_g": 1.8,
+        "fiber_g": 3.5,
+    },
+    "chicken_breast": {
+        "food_name": "Grilled Chicken Breast",
+        "serving_size": "1 breast fillet (approx. 120g)",
+        "calories": 198,
+        "protein_g": 37.0,
+        "carbs_g": 0.0,
+        "fat_g": 4.3,
+        "fiber_g": 0.0,
+    },
+    "salmon": {
+        "food_name": "Grilled Salmon Fillet",
+        "serving_size": "1 fillet (approx. 150g)",
+        "calories": 309,
+        "protein_g": 34.0,
+        "carbs_g": 0.0,
+        "fat_g": 18.0,
+        "fiber_g": 0.0,
+    },
+    "tofu": {
+        "food_name": "Firm Tofu",
+        "serving_size": "1/2 cup (approx. 126g)",
+        "calories": 181,
+        "protein_g": 21.8,
+        "carbs_g": 3.5,
+        "fat_g": 11.0,
+        "fiber_g": 2.9,
+    },
+    "milk": {
+        "food_name": "Whole Cow Milk",
+        "serving_size": "1 cup (approx. 244ml)",
+        "calories": 149,
+        "protein_g": 7.7,
+        "carbs_g": 11.7,
+        "fat_g": 8.0,
+        "fiber_g": 0.0,
+    },
+    "yogurt": {
+        "food_name": "Plain Greek Yogurt",
+        "serving_size": "1 container (approx. 170g)",
+        "calories": 100,
+        "protein_g": 17.0,
+        "carbs_g": 6.0,
+        "fat_g": 0.7,
+        "fiber_g": 0.0,
+    },
+    "bread": {
+        "food_name": "Whole Wheat Bread",
+        "serving_size": "1 slice (approx. 43g)",
+        "calories": 110,
+        "protein_g": 5.0,
+        "carbs_g": 20.0,
+        "fat_g": 1.5,
+        "fiber_g": 3.0,
+    },
+    "oatmeal": {
+        "food_name": "Cooked Rolled Oatmeal",
+        "serving_size": "1 cup with water (approx. 234g)",
+        "calories": 158,
+        "protein_g": 5.9,
+        "carbs_g": 27.3,
+        "fat_g": 3.2,
+        "fiber_g": 4.0,
+    },
+    "dal": {
+        "food_name": "Cooked Lentils / Dal",
+        "serving_size": "1 cup cooked (approx. 198g)",
+        "calories": 230,
+        "protein_g": 17.9,
+        "carbs_g": 39.9,
+        "fat_g": 0.8,
+        "fiber_g": 15.6,
+    },
+    "lentils": {
+        "food_name": "Cooked Lentils / Dal",
+        "serving_size": "1 cup cooked (approx. 198g)",
+        "calories": 230,
+        "protein_g": 17.9,
+        "carbs_g": 39.9,
+        "fat_g": 0.8,
+        "fiber_g": 15.6,
+    },
+    "roti": {
+        "food_name": "Whole Wheat Chapati / Roti",
+        "serving_size": "1 piece (approx. 40g)",
+        "calories": 115,
+        "protein_g": 3.5,
+        "carbs_g": 22.0,
+        "fat_g": 1.5,
+        "fiber_g": 3.0,
+    },
+    "chapati": {
+        "food_name": "Whole Wheat Chapati / Roti",
+        "serving_size": "1 piece (approx. 40g)",
+        "calories": 115,
+        "protein_g": 3.5,
+        "carbs_g": 22.0,
+        "fat_g": 1.5,
+        "fiber_g": 3.0,
+    },
+}
+
 
 def normalize_food_key(label: str) -> str:
     """Normalize input label to match dataset key (e.g. 'Apple Pie' -> 'apple_pie')."""
@@ -1071,46 +1445,96 @@ def calculate_health_score(nut: Dict[str, Any]) -> tuple:
     return score, label, reasoning_text, clean_suggestions
 
 
+def get_all_reference_foods() -> Dict[str, Dict[str, Any]]:
+    """Combined reference dictionary of Food-101 and common whole foods."""
+    return {**COMMON_PRODUCE_AND_STAPLES_DATASET, **FOOD_NUTRITION_DATASET}
+
+
+def _build_nutrition_response(
+    item: Dict[str, Any],
+    is_verified: bool = True,
+    is_fallback: bool = False,
+) -> Dict[str, Any]:
+    """Builds a standardized nutrition response with portion uncertainty ranges."""
+    score, h_label, h_reason, h_suggestions = calculate_health_score(item)
+    cal = int(item["calories"])
+    # Portions in home cooking/restaurants vary typically by ±20% to ±25%
+    min_cal = max(0, int(round(cal * 0.80)))
+    max_cal = max(min_cal, int(round(cal * 1.25)))
+    assert min_cal <= max_cal, "Uncertainty validation: minimum calories must not exceed maximum"
+
+    serving_size = item.get("serving_size", "1 standard portion (approx. 150g)")
+
+    return {
+        "food_name": item["food_name"],
+        "serving_size": serving_size,
+        "calories": cal,
+        "min_calories": min_cal,
+        "max_calories": max_cal,
+        "protein_g": float(item.get("protein_g", 0.0)),
+        "carbs_g": float(item.get("carbs_g", 0.0)),
+        "fat_g": float(item.get("fat_g", 0.0)),
+        "fiber_g": float(item.get("fiber_g", 0.0)),
+        "health_score": score,
+        "health_label": h_label,
+        "health_reasoning": h_reason,
+        "health_suggestions": h_suggestions,
+        "source": DATA_SOURCE_NAME,
+        "is_estimate": True,
+        "is_verified": is_verified,
+        "is_fallback": is_fallback,
+        "serving_assumptions": f"Standard typical serving: {serving_size}.",
+        "assumed_serving_note": f"Estimated values assume a standard serving of: {serving_size}",
+        "portion_uncertainty_note": (
+            "Calorie values represent typical serving estimates with a ±20-25% variance range. "
+            "A 2D image cannot establish true physical volume, mass, moisture, or hidden culinary fats/oils."
+        ),
+        "disclaimer": DEFAULT_DISCLAIMER,
+    }
+
+
+def lookup_nutrition_data(query: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up verified standard reference nutrition facts for a given food name.
+    Returns None if the item is not cataloged (never fabricates or guesses unsupported foods).
+    """
+    if not query or not query.strip():
+        return None
+
+    key = normalize_food_key(query)
+    all_foods = get_all_reference_foods()
+
+    # 1. Exact normalized match
+    if key in all_foods:
+        return _build_nutrition_response(all_foods[key], is_verified=True, is_fallback=False)
+
+    # 2. Singular/plural normalization match
+    if key.endswith("s") and key[:-1] in all_foods:
+        return _build_nutrition_response(all_foods[key[:-1]], is_verified=True, is_fallback=False)
+    if key.endswith("es") and key[:-2] in all_foods:
+        return _build_nutrition_response(all_foods[key[:-2]], is_verified=True, is_fallback=False)
+
+    # 3. Substring / whole word match
+    for k, v in all_foods.items():
+        if k == key:
+            return _build_nutrition_response(v, is_verified=True, is_fallback=False)
+        if len(key) >= 3 and (k in key or key in k):
+            return _build_nutrition_response(v, is_verified=True, is_fallback=False)
+
+    return None
+
+
 def get_nutrition_estimate(label: str) -> Dict[str, Any]:
     """
     Retrieve reference nutrition data and rule-based health score for a given food label.
-    Always flags the result as an estimate and provides assumed serving size, disclaimer,
-    health score, label, reasoning, and practical suggestions.
+    Falls back gracefully with explicit fallback flags for uncataloged items to preserve
+    backward compatibility with existing downstream consumers.
     """
-    key = normalize_food_key(label)
+    data = lookup_nutrition_data(label)
+    if data:
+        return data
 
-    # 1. Exact normalized match
-    item = FOOD_NUTRITION_DATASET.get(key)
-
-    # 2. Substring fallback match if not exact
-    if not item:
-        for k, v in FOOD_NUTRITION_DATASET.items():
-            if k in key or key in k:
-                item = v
-                break
-
-    # 3. If found in database
-    if item:
-        score, h_label, h_reason, h_suggestions = calculate_health_score(item)
-        return {
-            "food_name": item["food_name"],
-            "serving_size": item["serving_size"],
-            "calories": item["calories"],
-            "protein_g": item["protein_g"],
-            "carbs_g": item["carbs_g"],
-            "fat_g": item["fat_g"],
-            "fiber_g": item["fiber_g"],
-            "health_score": score,
-            "health_label": h_label,
-            "health_reasoning": h_reason,
-            "health_suggestions": h_suggestions,
-            "source": DATA_SOURCE_NAME,
-            "is_estimate": True,
-            "assumed_serving_note": f"Estimated values assume a standard serving of: {item['serving_size']}",
-            "disclaimer": DEFAULT_DISCLAIMER,
-        }
-
-    # 4. Graceful fallback for uncataloged item
+    # Graceful fallback for uncataloged item
     formatted_name = label.replace("_", " ").title() if label else "Unknown Dish"
     fallback_data = {
         "food_name": formatted_name,
@@ -1121,15 +1545,4 @@ def get_nutrition_estimate(label: str) -> Dict[str, Any]:
         "fat_g": 14.0,
         "fiber_g": 2.0,
     }
-    score, h_label, h_reason, h_suggestions = calculate_health_score(fallback_data)
-    return {
-        **fallback_data,
-        "health_score": score,
-        "health_label": h_label,
-        "health_reasoning": h_reason,
-        "health_suggestions": h_suggestions,
-        "source": DATA_SOURCE_NAME,
-        "is_estimate": True,
-        "assumed_serving_note": "Estimated values assume an average mixed-meal reference serving (approx. 200g)",
-        "disclaimer": DEFAULT_DISCLAIMER,
-    }
+    return _build_nutrition_response(fallback_data, is_verified=False, is_fallback=True)

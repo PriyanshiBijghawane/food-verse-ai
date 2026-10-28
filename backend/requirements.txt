@@ -5,3 +5,7 @@ torch
 torchvision
 pillow
 transformers
+opencv-python-headless
+httpx
+pytest
+

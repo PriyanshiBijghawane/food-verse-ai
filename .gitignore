@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 venv/
+venv_new/
 .venv/
 __pycache__/
 .pytest_cache/
@@ -9,3 +10,7 @@ node_modules/
 .next/
 dist/
 build/
+# Runtime data
+backend/uploads/
+backend/foodverse.db
+backend/data/

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -25,8 +25,17 @@ import {
   Image as ImageIcon,
   AlertCircle,
   CheckCircle2,
-  Loader2
+  Loader2,
+  User,
+  Scale
 } from 'lucide-react'
+import FreshnessWorkspace from './FreshnessWorkspace'
+import HygieneWorkspace from './HygieneWorkspace'
+import CookingAssistantWorkspace from './CookingWorkspace'
+import MealPlannerWorkspace from './MealPlannerWorkspace'
+import ProfileWorkspace from './ProfileWorkspace'
+import SettingsWorkspace from './SettingsWorkspace'
+import DocumentationWorkspace from './DocumentationWorkspace'
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -111,9 +120,175 @@ const modules = [
 ]
 
 export default function App() {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
+
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
   const [searchQuery, setSearchQuery] = useState('')
+
+  // User Profile State with local storage fallback
+  const [userProfile, setUserProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('foodverse_profile')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return {
+      name: 'Jane Doe',
+      email: 'jane.doe@example.com',
+      age: 28,
+      gender: 'female',
+      height_cm: 168,
+      weight_kg: 65,
+      activity_level: 'moderately_active',
+      primary_goal: 'weight_loss',
+      diet_type: 'balanced',
+      allergies: [],
+      food_restrictions: [],
+      cuisine_preferences: ['Mediterranean', 'Balanced']
+    }
+  })
+
+  // Application Settings State with local storage fallback
+  const [userSettings, setUserSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('foodverse_settings')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return {
+      units: 'metric',
+      default_diet: 'balanced',
+      default_cuisine: 'Any',
+      default_cooking_time: 30,
+      vision_confidence_threshold: 0.20,
+      in_app_notifications: true
+    }
+  })
+
+  // Notifications State
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const saved = localStorage.getItem('foodverse_notifications')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return []
+  })
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [backendConnected, setBackendConnected] = useState(false)
+  const notifDropdownRef = useRef(null)
+
+  // Initial Sync from Backend
+  useEffect(() => {
+    // Health check
+    fetch(`${apiBaseUrl}/health`)
+      .then((res) => {
+        if (res.ok) setBackendConnected(true)
+      })
+      .catch(() => setBackendConnected(false))
+
+    // Profile sync
+    fetch(`${apiBaseUrl}/api/v1/user/profile`)
+      .then((res) => res.ok && res.json())
+      .then((data) => {
+        if (data?.profile) {
+          setUserProfile(data.profile)
+          localStorage.setItem('foodverse_profile', JSON.stringify(data.profile))
+        }
+      })
+      .catch(() => {})
+
+    // Settings sync
+    fetch(`${apiBaseUrl}/api/v1/user/settings`)
+      .then((res) => res.ok && res.json())
+      .then((data) => {
+        if (data?.settings) {
+          setUserSettings(data.settings)
+          localStorage.setItem('foodverse_settings', JSON.stringify(data.settings))
+        }
+      })
+      .catch(() => {})
+
+    // Notifications sync
+    fetch(`${apiBaseUrl}/api/v1/notifications`)
+      .then((res) => res.ok && res.json())
+      .then((data) => {
+        if (data?.notifications) {
+          setNotifications(data.notifications)
+          localStorage.setItem('foodverse_notifications', JSON.stringify(data.notifications))
+        }
+      })
+      .catch(() => {})
+  }, [apiBaseUrl])
+
+  // Close notifications on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setNotificationsOpen(false)
+      }
+    }
+    if (notificationsOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [notificationsOpen])
+
+  // Notification actions
+  const addNotification = (notif) => {
+    if (userSettings?.in_app_notifications === false) return
+    const newNotif = {
+      id: notif.id || `notif-${Date.now()}`,
+      title: notif.title,
+      message: notif.message,
+      type: notif.type || 'info',
+      timestamp: Date.now(),
+      read: false,
+      module: notif.module || null
+    }
+
+    setNotifications((prev) => {
+      const updated = [newNotif, ...prev.filter(n => n.id !== newNotif.id)].slice(0, 50)
+      localStorage.setItem('foodverse_notifications', JSON.stringify(updated))
+      return updated
+    })
+
+    fetch(`${apiBaseUrl}/api/v1/notifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newNotif)
+    }).catch(() => {})
+  }
+
+  const markAllRead = () => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, read: true }))
+      localStorage.setItem('foodverse_notifications', JSON.stringify(updated))
+      return updated
+    })
+    fetch(`${apiBaseUrl}/api/v1/notifications/mark-read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    }).catch(() => {})
+  }
+
+  const clearAllNotifications = () => {
+    setNotifications([])
+    localStorage.setItem('foodverse_notifications', JSON.stringify([]))
+    fetch(`${apiBaseUrl}/api/v1/notifications/clear`, {
+      method: 'POST'
+    }).catch(() => {})
+  }
+
+  const unreadCount = notifications.filter((n) => !n.read).length
+
+  const getInitials = (n) => {
+    if (!n || !n.trim()) return 'FV'
+    const parts = n.trim().split(' ')
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  }
 
   // Food Recognition Image Upload & API State
   const [selectedImage, setSelectedImage] = useState(null)
@@ -204,7 +379,7 @@ export default function App() {
       const formData = new FormData()
       formData.append('file', selectedImage.file)
 
-      const response = await fetch('http://127.0.0.1:8000/api/v1/food/recognize', {
+      const response = await fetch(`${apiBaseUrl}/api/v1/food/recognize`, {
         method: 'POST',
         body: formData,
       })
@@ -216,8 +391,23 @@ export default function App() {
       }
 
       setAnalysisResult(data)
+      addNotification({
+        id: `food-${Date.now()}`,
+        title: 'Food Recognition Complete',
+        message: `Identified "${data.predicted_label}" with ${(data.confidence * 100).toFixed(1)}% confidence.`,
+        type: 'success',
+        module: 'food-recognition'
+      })
     } catch (err) {
-      setAnalysisError(err.message || 'Unable to connect to the backend server at http://127.0.0.1:8000.')
+      const errMsg = err.message || 'Unable to connect to the backend server.'
+      setAnalysisError(errMsg)
+      addNotification({
+        id: `food-err-${Date.now()}`,
+        title: 'Food Recognition Failed',
+        message: errMsg,
+        type: 'error',
+        module: 'food-recognition'
+      })
     } finally {
       setIsAnalyzing(false)
     }
@@ -290,6 +480,18 @@ export default function App() {
           <ul className="nav-list">
             <li>
               <button
+                className={`nav-button ${activeTab === 'profile' ? 'nav-button-active' : ''}`}
+                onClick={() => {
+                  setActiveTab('profile')
+                  setSidebarOpen(false)
+                }}
+              >
+                <User size={18} className="nav-button-icon" />
+                <span>Profile</span>
+              </button>
+            </li>
+            <li>
+              <button
                 className={`nav-button ${activeTab === 'settings' ? 'nav-button-active' : ''}`}
                 onClick={() => {
                   setActiveTab('settings')
@@ -319,10 +521,22 @@ export default function App() {
         <div className="sidebar-footer">
           <div className="ai-status-card">
             <div className="ai-status-indicator">
-              <span className="status-dot"></span>
-              <span className="status-label">AI Engine Active</span>
+              <span
+                className="status-dot"
+                style={{
+                  backgroundColor: backendConnected ? '#10b981' : '#f59e0b',
+                  boxShadow: backendConnected ? '0 0 8px rgba(16, 185, 129, 0.6)' : 'none',
+                }}
+              ></span>
+              <span className="status-label">
+                {backendConnected ? 'AI Engine Connected' : 'Checking Engine...'}
+              </span>
             </div>
-            <p className="ai-status-desc">Vision & Nutrition Models v2.4 Ready</p>
+            <p className="ai-status-desc">
+              {backendConnected
+                ? 'ViT & Nutrition APIs Online'
+                : 'Connecting to local FastAPI server'}
+            </p>
           </div>
         </div>
       </aside>
@@ -352,15 +566,143 @@ export default function App() {
           </div>
 
           <div className="header-right">
-            <button className="icon-btn" aria-label="Notifications">
-              <Bell size={20} />
-              <span className="notification-badge"></span>
-            </button>
-            <div className="user-profile">
-              <div className="user-avatar">FV</div>
+            {/* Notification Bell & Dropdown */}
+            <div className="notifications-wrapper" ref={notifDropdownRef}>
+              <button
+                className="icon-btn"
+                aria-label="Notifications"
+                onClick={() => setNotificationsOpen(!notificationsOpen)}
+                title="Notifications"
+              >
+                <Bell size={20} />
+                {unreadCount > 0 && (
+                  <span className="notification-badge-count">{unreadCount > 9 ? '9+' : unreadCount}</span>
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="notifications-panel">
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      background: 'rgba(244, 237, 227, 0.65)',
+                      borderBottom: '1px solid rgba(22, 62, 48, 0.08)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-primary-900)' }}>
+                        Notifications
+                      </span>
+                      {unreadCount > 0 && (
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            padding: '2px 6px',
+                            background: 'var(--color-primary-600)',
+                            color: '#ffffff',
+                            borderRadius: '10px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {unreadCount} new
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={markAllRead}
+                          style={{ fontSize: '0.74rem', color: 'var(--color-primary-600)', fontWeight: 600 }}
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                      {notifications.length > 0 && (
+                        <button
+                          onClick={clearAllNotifications}
+                          style={{ fontSize: '0.74rem', color: '#dc2626', fontWeight: 600 }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
+                    {notifications.length === 0 ? (
+                      <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        <Bell size={28} style={{ opacity: 0.3, margin: '0 auto 8px' }} />
+                        <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>No notifications yet</p>
+                        <p style={{ fontSize: '0.74rem', marginTop: '2px' }}>
+                          Activity from meal planning, cooking, and vision scans will appear here.
+                        </p>
+                      </div>
+                    ) : (
+                      notifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          style={{
+                            padding: '12px 16px',
+                            borderBottom: '1px solid rgba(22, 62, 48, 0.06)',
+                            background: notif.read ? '#ffffff' : 'rgba(240, 248, 245, 0.6)',
+                            display: 'flex',
+                            gap: '10px',
+                            alignItems: 'flex-start',
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              background: notif.read
+                                ? 'transparent'
+                                : notif.type === 'error'
+                                ? '#ef4444'
+                                : notif.type === 'success'
+                                ? '#10b981'
+                                : '#3b82f6',
+                              marginTop: '5px',
+                              flexShrink: 0,
+                            }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                              <strong style={{ fontSize: '0.82rem', color: 'var(--color-primary-900)' }}>
+                                {notif.title}
+                              </strong>
+                              <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                                {notif.timestamp ? new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '2px', lineHeight: 1.4 }}>
+                              {notif.message}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Clickable Real User Profile */}
+            <div
+              className="user-profile"
+              onClick={() => {
+                setActiveTab('profile')
+                setSidebarOpen(false)
+              }}
+              title="Click to view and edit profile"
+            >
+              <div className="user-avatar">{getInitials(userProfile.name)}</div>
               <div className="user-info">
-                <span className="user-name">Foodie Explorer</span>
-                <span className="user-role">Premium Member</span>
+                <span className="user-name">{userProfile.name || 'Guest User'}</span>
+                <span className="user-role">{userProfile.diet_type ? userProfile.diet_type.toUpperCase() : 'GUEST'}</span>
               </div>
             </div>
           </div>
@@ -390,8 +732,14 @@ export default function App() {
                       <Flame size={20} />
                     </div>
                     <div className="metric-data">
-                      <span className="metric-value">1,850</span>
-                      <span className="metric-label">Kcal Target</span>
+                      <span className="metric-value">
+                        {Math.round(
+                          (userProfile.gender === 'male'
+                            ? 10 * (userProfile.weight_kg || 65) + 6.25 * (userProfile.height_cm || 168) - 5 * (userProfile.age || 28) + 5
+                            : 10 * (userProfile.weight_kg || 65) + 6.25 * (userProfile.height_cm || 168) - 5 * (userProfile.age || 28) - 161) * 1.55
+                        ).toLocaleString()} kcal
+                      </span>
+                      <span className="metric-label">Target Energy</span>
                     </div>
                   </div>
 
@@ -400,8 +748,8 @@ export default function App() {
                       <Activity size={20} />
                     </div>
                     <div className="metric-data">
-                      <span className="metric-value">98.4%</span>
-                      <span className="metric-label">Freshness Score</span>
+                      <span className="metric-value">Ready</span>
+                      <span className="metric-label">Multi-Spectral Sensor</span>
                     </div>
                   </div>
 
@@ -1384,191 +1732,41 @@ export default function App() {
                 </div>
               </section>
             </div>
-          ) : selectedModule ? (
-            /* Selected AI Module Placeholder View for other 4 modules */
-            <div className="module-view">
-              <section className="welcome-section">
-                <div className="welcome-content">
-                  <button
-                    onClick={() => setActiveTab('dashboard')}
-                    className="card-action-btn"
-                    style={{
-                      display: 'inline-flex',
-                      width: 'auto',
-                      marginBottom: '16px',
-                      padding: '6px 14px',
-                      background: 'rgba(255, 255, 255, 0.12)',
-                      color: '#ffffff',
-                      borderColor: 'rgba(255, 255, 255, 0.2)',
-                    }}
-                  >
-                    <ArrowLeft size={16} />
-                    <span>Back to Dashboard</span>
-                  </button>
-
-                  <div className="welcome-tag">
-                    <Sparkles size={14} />
-                    <span>{selectedModule.tag}</span>
-                  </div>
-
-                  <h1 className="welcome-title">{selectedModule.title}</h1>
-                  <p className="welcome-description">{selectedModule.description}</p>
-                </div>
-
-                <div className="metrics-grid">
-                  <div className="metric-card">
-                    <div className="metric-icon-box bg-emerald">
-                      <selectedModule.icon size={20} />
-                    </div>
-                    <div className="metric-data">
-                      <span className="metric-value">Frontend Ready</span>
-                      <span className="metric-label">Interface Active</span>
-                    </div>
-                  </div>
-
-                  <div className="metric-card">
-                    <div className="metric-icon-box bg-orange">
-                      <Server size={20} />
-                    </div>
-                    <div className="metric-data">
-                      <span className="metric-value">Endpoint</span>
-                      <span className="metric-label" style={{ textTransform: 'none' }}>
-                        {selectedModule.endpoint}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="modules-section">
-                <div className="modules-header">
-                  <div>
-                    <h2 className="section-title">Module Workspace</h2>
-                    <p className="section-subtitle">
-                      User interface connected. Awaiting backend API service and ML model integration.
-                    </p>
-                  </div>
-                  <span className={`card-badge ${selectedModule.badgeClass}`}>
-                    {selectedModule.tag}
-                  </span>
-                </div>
-
-                <div className="module-card" style={{ padding: '36px 30px' }}>
-                  <div className="card-top" style={{ marginBottom: '20px' }}>
-                    <div className="card-icon-container">
-                      <selectedModule.icon size={24} className="card-icon" />
-                    </div>
-                    <span className="feature-pill" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className="status-dot" style={{ display: 'inline-block' }}></span>
-                      Integration Ready
-                    </span>
-                  </div>
-
-                  <h3 className="card-title" style={{ fontSize: '1.35rem', marginBottom: '12px' }}>
-                    {selectedModule.title} Pipeline
-                  </h3>
-                  <p className="card-description" style={{ fontSize: '0.92rem', marginBottom: '24px' }}>
-                    {selectedModule.details}
-                  </p>
-
-                  <div style={{ marginBottom: '28px' }}>
-                    <span
-                      style={{
-                        display: 'block',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        color: 'var(--color-text-secondary)',
-                        marginBottom: '10px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                      }}
-                    >
-                      Configured Capabilities
-                    </span>
-                    <div className="card-features">
-                      {selectedModule.features.map((feature, idx) => (
-                        <span key={idx} className="feature-pill" style={{ padding: '6px 12px' }}>
-                          ✓ {feature}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="card-footer" style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-                    <button
-                      className="card-action-btn"
-                      style={{ maxWidth: '220px' }}
-                      onClick={() => setActiveTab('dashboard')}
-                    >
-                      <ArrowLeft size={16} />
-                      <span>Return to Dashboard</span>
-                    </button>
-                  </div>
-                </div>
-              </section>
-            </div>
-          ) : (
-            /* Settings or Documentation Views */
-            <div className="module-view">
-              <section className="welcome-section">
-                <div className="welcome-content">
-                  <button
-                    onClick={() => setActiveTab('dashboard')}
-                    className="card-action-btn"
-                    style={{
-                      display: 'inline-flex',
-                      width: 'auto',
-                      marginBottom: '16px',
-                      padding: '6px 14px',
-                      background: 'rgba(255, 255, 255, 0.12)',
-                      color: '#ffffff',
-                      borderColor: 'rgba(255, 255, 255, 0.2)',
-                    }}
-                  >
-                    <ArrowLeft size={16} />
-                    <span>Back to Dashboard</span>
-                  </button>
-
-                  <div className="welcome-tag">
-                    <Sparkles size={14} />
-                    <span>System Information</span>
-                  </div>
-
-                  <h1 className="welcome-title">
-                    {activeTab === 'settings' ? 'Application Settings' : 'Documentation & Guides'}
-                  </h1>
-                  <p className="welcome-description">
-                    {activeTab === 'settings'
-                      ? 'Configure computer vision model thresholds, notification channels, and backend API service URLs.'
-                      : 'Explore API endpoints, architecture specifications, and guides for running Food Verse AI.'}
-                  </p>
-                </div>
-              </section>
-
-              <section className="modules-section">
-                <div className="module-card" style={{ padding: '36px 30px' }}>
-                  <h3 className="card-title">
-                    {activeTab === 'settings' ? 'Configuration Hub' : 'Developer Resources'}
-                  </h3>
-                  <p className="card-description">
-                    {activeTab === 'settings'
-                      ? 'Settings configuration panel is active. Environment variables and backend URL mappings can be adjusted as services come online.'
-                      : 'Full documentation guides covering model architecture, dataset citations, and endpoint payload schemas will be linked here.'}
-                  </p>
-                  <div className="card-footer">
-                    <button
-                      className="card-action-btn"
-                      style={{ maxWidth: '220px' }}
-                      onClick={() => setActiveTab('dashboard')}
-                    >
-                      <ArrowLeft size={16} />
-                      <span>Return to Dashboard</span>
-                    </button>
-                  </div>
-                </div>
-              </section>
-            </div>
-          )}
+          ) : activeTab === 'freshness-detection' ? (
+            <FreshnessWorkspace apiBaseUrl={apiBaseUrl} />
+          ) : activeTab === 'restaurant-hygiene' ? (
+            <HygieneWorkspace apiBaseUrl={apiBaseUrl} />
+          ) : activeTab === 'smart-cooking' ? (
+            <CookingAssistantWorkspace
+              apiBaseUrl={apiBaseUrl}
+              userSettings={userSettings}
+              onNotification={addNotification}
+            />
+          ) : activeTab === 'meal-planner' ? (
+            <MealPlannerWorkspace
+              apiBaseUrl={apiBaseUrl}
+              userProfile={userProfile}
+              userSettings={userSettings}
+              onNotification={addNotification}
+            />
+          ) : activeTab === 'profile' ? (
+            <ProfileWorkspace
+              apiBaseUrl={apiBaseUrl}
+              currentProfile={userProfile}
+              userSettings={userSettings}
+              onProfileUpdated={(p) => setUserProfile(p)}
+              onNotification={addNotification}
+            />
+          ) : activeTab === 'settings' ? (
+            <SettingsWorkspace
+              apiBaseUrl={apiBaseUrl}
+              currentSettings={userSettings}
+              onSettingsUpdated={(s) => setUserSettings(s)}
+              onNotification={addNotification}
+            />
+          ) : activeTab === 'documentation' ? (
+            <DocumentationWorkspace />
+          ) : null}
         </main>
       </div>
     </div>

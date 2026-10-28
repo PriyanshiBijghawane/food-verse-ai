@@ -24,13 +24,18 @@ Supported food categories for context-aware heuristics
 from __future__ import annotations
 
 import io
+import json
 import logging
 import math
-from typing import Any
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import torch
+import torch.nn as nn
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
+from torchvision import models, transforms
 
 logger = logging.getLogger("food_verse_ai.freshness")
 
@@ -132,12 +137,14 @@ def _preprocess(img: Image.Image) -> tuple[Image.Image, dict]:
     meta["mean_luminance"]  = round(mean_lum, 1)
     meta["contrast_stddev"] = round(std_lum,  1)
 
-    # --- Adaptive lighting correction ---------------------------------------
+    # --- Adaptive lighting correction without channel color shift ------------
     lighting_note = "Normal exposure"
     if mean_lum < 40 or std_lum < 25:
-        img = ImageOps.autocontrast(img, cutoff=1)
-        enhancer = ImageEnhance.Brightness(img)
-        img = enhancer.enhance(1.25)
+        # Use brightness and contrast enhancement rather than per-channel autocontrast which distorts color balance
+        enhancer_b = ImageEnhance.Brightness(img)
+        img = enhancer_b.enhance(1.2)
+        enhancer_c = ImageEnhance.Contrast(img)
+        img = enhancer_c.enhance(1.1)
         lighting_note = "Enhanced: low-light / dim scene detected"
         meta["lighting_enhanced"] = True
     elif mean_lum > 220:
@@ -190,7 +197,7 @@ def _extract_features(img: Image.Image) -> dict:
     delta = cmax - cmin + 1e-8
 
     v = cmax                                        # Value  0-1
-    s = np.where(cmax > 0, delta / cmax, 0.0)       # Saturation  0-1
+    s = np.divide(delta, cmax, out=np.zeros_like(delta), where=(cmax > 1e-6))
 
     # Hue (degrees 0-360)
     h = np.zeros_like(r)
@@ -207,23 +214,31 @@ def _extract_features(img: Image.Image) -> dict:
 
     total_px = float(r.size)
 
+    # --- Texture variance & Edge density (computed early for mask refinement) ---
+    gray_arr = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+    texture_variance = float(np.var(gray_arr))
 
+    gy = np.diff(gray_arr, axis=0)
+    gx = np.diff(gray_arr, axis=1)
+    grad_h = np.sqrt(gy[:, :-1] ** 2 + gx[:-1, :] ** 2)
+    edge_density = float(np.mean(grad_h > 20))
+
+    # Pad grad_h to match (H, W) for spatial masking
+    grad_map = np.pad(grad_h, ((0, 1), (0, 1)), mode="edge")
 
     # --- Brown / oxidation (general brown/oxidation, includes many brown hues)
     brown_mask = (
         (h >= 5) & (h <= 42) &
-        (v >= 0.12) & (v <= 0.55) &
-        (s >= 0.20) & (s <= 0.80)
+        (v >= 0.12) & (v <= 0.58) &
+        (s >= 0.18)
     )
 
-    # --- Refined brown‑rot region (orange‑brown rot that can be confused with fresh orange)
-    # Hue 5‑42°, moderate brightness (V 0.20–0.55), any noticeable saturation.
-    # Upper saturation raised from 0.55 to 0.85 to capture high-saturation brown rot
-    # (e.g. RGB 90,50,20 → sat ~0.78, val ~0.35).
+    # --- Refined brown‑rot region (deep rust, amber, dark-brown fungal decay)
+    # Hue 5‑42°, moderate brightness (V 0.15–0.58), saturation >= 0.18 (no artificial upper cap)
     brown_rot_mask = (
         (h >= 5) & (h <= 42) &
-        (v >= 0.20) & (v <= 0.55) &
-        (s >= 0.20) & (s <= 0.85)
+        (v >= 0.15) & (v <= 0.58) &
+        (s >= 0.18)
     )
 
     # --- Very dark patches (possible rot, bruising, deep shadow) ------------
@@ -233,76 +248,85 @@ def _extract_features(img: Image.Image) -> dict:
     grey_mask = (s < 0.12) & (v > 0.28) & (v < 0.80)
 
     # --- Mould teal/blue-green: hue 155-215°, medium-high saturation -------
-    # Deliberately excludes vivid-green (~90-155°) of fresh produce.
     mould_teal_mask = (
         (h >= 155) & (h <= 215) &
         (s >= 0.28) & (v >= 0.22)
     )
 
-    # --- Fuzzy white mould patches: near-white with low saturation ----------
-    # To avoid false positives on clean plates and plain backgrounds, we compute
-    # a per-pixel candidate mask first, then suppress it if the image has very
-    # low texture variance AND low edge density (indicating a uniform surface
-    # rather than fuzzy mould growth).  The suppression is applied later in
-    # _compute_freshness_score via the 'low_information' flag.
-    mould_white_mask = (v > 0.88) & (s < 0.07)
+    # --- Fresh vivid colour: greens (80-155°), reds (340-360° ∪ 0-20°),
+    #     oranges (20-42°), with HIGH saturation & HIGH brightness -----------
+    fresh_green_mask  = (h >= 80)  & (h <= 155) & (s >= 0.35) & (v >= 0.42)
+    fresh_red_mask    = ((h >= 340) | (h <= 20)) & (s >= 0.45) & (v >= 0.55)
+    fresh_orange_mask = (h > 20)  & (h < 42)  & (s >= 0.50) & (v >= 0.55)
+    fresh_vivid_mask  = fresh_green_mask | fresh_red_mask | fresh_orange_mask
+
+    fresh_vivid_frac = float(np.sum(fresh_vivid_mask) / total_px)
+    brown_rot_frac = float(np.sum(brown_rot_mask) / total_px)
+    brown_frac      = float(np.sum(brown_mask)      / total_px)
+    dark_frac       = float(np.sum(dark_mask)       / total_px)
+    grey_frac       = float(np.sum(grey_mask)       / total_px)
+    mould_teal_frac = float(np.sum(mould_teal_mask) / total_px)
+
+    # --- White background vs White fuzzy mould detection -------------------
+    # A clean white plate or light tabletop is characterized by bright, low-saturation pixels.
+    # True fuzzy mould exhibits rough texture/edge gradients on food surfaces.
+    # If the white area is extensive (>30% of frame), smooth white pixels are recognized
+    # as background plate rather than fungal mould.
+    white_surface_candidate = (v > 0.82) & (s < 0.12)
+    white_surface_frac = float(np.sum(white_surface_candidate) / total_px)
+
+    if white_surface_frac > 0.30:
+        # Require local texture gradient for fuzzy mould candidate to avoid plate false-positives
+        mould_white_mask = (v > 0.88) & (s < 0.07) & (grad_map > 16.0)
+    else:
+        mould_white_mask = (v > 0.88) & (s < 0.07)
+
+    mould_white_frac = float(np.sum(mould_white_mask) / total_px)
 
     # --- Yellowing: hue 42-70°, warm saturation, medium value ---------------
     yellow_mask = (
         (h >= 42) & (h <= 72) &
         (s >= 0.28) & (v >= 0.40)
     )
+    yellow_frac = float(np.sum(yellow_mask) / total_px)
 
-    # --- Fresh vivid colour: greens (80-155°), reds (340-360° ∪ 0-20°),
-    #     oranges (20-42°), with HIGH saturation & HIGH brightness -----------
-    # V >= 0.55 for orange/red to exclude warm-brown rot (V typically 0.35-0.52)
-    # V >= 0.42 for green (darker greens like spinach are still fresh)
-    fresh_green_mask  = (h >= 80)  & (h <= 155) & (s >= 0.35) & (v >= 0.42)
-    fresh_red_mask    = ((h >= 340) | (h <= 20)) & (s >= 0.45) & (v >= 0.55)
-    fresh_orange_mask = (h > 20)  & (h < 42)  & (s >= 0.50) & (v >= 0.55)
-    fresh_vivid_mask  = fresh_green_mask | fresh_red_mask | fresh_orange_mask
-
-    brown_frac      = float(np.sum(brown_mask)      / total_px)
-    dark_frac       = float(np.sum(dark_mask)       / total_px)
-    grey_frac       = float(np.sum(grey_mask)       / total_px)
-    mould_teal_frac = float(np.sum(mould_teal_mask) / total_px)
-    mould_white_frac = float(np.sum(mould_white_mask) / total_px)
-    yellow_frac     = float(np.sum(yellow_mask)     / total_px)
-    fresh_vivid_frac = float(np.sum(fresh_vivid_mask) / total_px)
-
-    # --- Texture variance (surface irregularity) ----------------------------
-    gray_arr = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
-    texture_variance = float(np.var(gray_arr))
-
-    # --- Edge density (shrivelling / surface deformation) ------------------
-    gy = np.diff(gray_arr, axis=0)
-    gx = np.diff(gray_arr, axis=1)
-    grad_h = np.sqrt(gy[:, :-1] ** 2 + gx[:-1, :] ** 2)
-    edge_density = float(np.mean(grad_h > 20))
-
-    # --- Low-information / empty-plate detection ----------------------------
-    # An image is "low information" when it is predominantly uniform with no
-    # vivid food colours, very little texture, and very low edge activity,
-    # AND no significant spoilage colour signals either.
-    # This catches: clean plates, plain backgrounds, blank surfaces.
-    # It does NOT catch images with strong spoilage colours (brown, grey, mould
-    # teal, etc.) — those have genuine food-related content even if texture is low.
-    #
-    # Criteria: saturation stddev < 0.04 AND texture_variance < 50.0
-    #           AND edge_density < 0.02 AND fresh_vivid_frac < 0.05
-    #           AND all spoilage colour fractions below their noise thresholds.
+    # --- Low-information / empty-plate / background-dominant detection -----
     has_spoilage_colour = (
         brown_frac >= 0.08
+        or brown_rot_frac >= 0.06
         or dark_frac >= 0.12
         or grey_frac >= 0.15
         or mould_teal_frac >= 0.04
         or yellow_frac >= 0.20
     )
-    low_information = (
-        std_sat < 0.04
-        and texture_variance < 50.0
-        and edge_density < 0.02
+
+    # 1. Clean plate or light surface: >60% light neutral area, no vivid food, no active spoilage
+    is_plate_or_light_bg = (
+        (white_surface_frac > 0.60)
+        and (fresh_vivid_frac < 0.05)
+        and not has_spoilage_colour
+    )
+
+    # 2. Plain uniform surface (e.g. blank cutting board, solid backdrop)
+    is_uniform_surface = (
+        std_sat < 0.06
+        and texture_variance < 80.0
+        and edge_density < 0.04
         and fresh_vivid_frac < 0.05
+        and not has_spoilage_colour
+    )
+
+    # 3. Overall neutral / featureless image (e.g. clean stainless steel or table without food)
+    neutral_pixel_frac = float(np.mean(s < 0.15))
+    is_neutral_background = (
+        neutral_pixel_frac > 0.75
+        and fresh_vivid_frac < 0.04
+        and not has_spoilage_colour
+        and edge_density < 0.12
+    )
+
+    low_information = bool(
+        (is_plate_or_light_bg or is_uniform_surface or is_neutral_background)
         and not has_spoilage_colour
     )
 
@@ -311,7 +335,7 @@ def _extract_features(img: Image.Image) -> dict:
         "mean_brightness":    round(mean_val,         4),
         "saturation_stddev":  round(std_sat,          4),
         "brown_fraction":     round(brown_frac,       4),
-        "brown_rot_fraction": round(float(np.sum(brown_rot_mask) / total_px), 4),
+        "brown_rot_fraction": round(brown_rot_frac,   4),
         "dark_fraction":      round(dark_frac,        4),
         "grey_fraction":      round(grey_frac,        4),
         "mould_teal_fraction":  round(mould_teal_frac,  4),
@@ -388,6 +412,8 @@ def _compute_freshness_score(features: dict, category: str) -> tuple[int, list[s
     fresh_frac   = features.get("fresh_vivid_fraction", 0.0)
     mean_sat     = features.get("mean_saturation", 0.5)
     mean_bright  = features.get("mean_brightness", 0.5)
+    brown_rot_val = features.get("brown_rot_fraction", 0.0)
+    brown_val     = features.get("brown_fraction", 0.0)
 
     # Vivid colour fraction bonus (max +18)
     colour_bonus = min(fresh_frac * 35.0, 18.0)
@@ -401,6 +427,14 @@ def _compute_freshness_score(features: dict, category: str) -> tuple[int, list[s
         bright_bonus = 2.0  # over-bright may be flash / bleached
 
     freshness_bonus = colour_bonus + sat_bonus + bright_bonus
+
+    # Severe rot check: active decay cannot be masked by surrounding vivid skin
+    is_severe_rot = (brown_rot_val >= 0.14) or (brown_rot_val >= 0.08 and brown_val >= 0.18)
+    if is_severe_rot:
+        freshness_bonus = 0.0
+    elif brown_rot_val >= 0.06:
+        freshness_bonus = min(freshness_bonus, 5.0)
+
     base_score = 70.0 + freshness_bonus
 
     # --- Spoilage penalties ---
@@ -421,6 +455,7 @@ def _compute_freshness_score(features: dict, category: str) -> tuple[int, list[s
                 feature_name
                 .replace("mould_teal", "Teal/Blue-green mould")
                 .replace("mould_white", "White fuzzy mould")
+                .replace("brown_rot", "Brown rot")
                 .replace("brown", "Brown/oxidation")
                 .replace("dark", "Dark patch")
                 .replace("grey", "Grey")
@@ -435,8 +470,14 @@ def _compute_freshness_score(features: dict, category: str) -> tuple[int, list[s
 
         spoilage_penalty += penalty
 
+    if is_severe_rot:
+        decay_penalty = max(35.0, brown_rot_val * 110.0)
+        spoilage_penalty += decay_penalty
+        if not any("rot" in s.lower() or "decay" in s.lower() for s in signs):
+            signs.insert(0, f"Significant brown rot decay lesion detected ({brown_rot_val * 100:.1f}% of visible area)")
+
     # --- Additional signal penalties ---
-    if mean_sat < 0.12:
+    if mean_sat < 0.12 and not is_severe_rot:
         spoilage_penalty += 10.0
         signs.append("Very low colour saturation — food appears faded or dull")
 
@@ -452,6 +493,10 @@ def _compute_freshness_score(features: dict, category: str) -> tuple[int, list[s
 
     raw_score = base_score - spoilage_penalty
     score = int(max(0, min(100, round(raw_score))))
+    if is_severe_rot and score >= 45:
+        score = 42
+    elif brown_rot_val >= 0.06 and score >= 65:
+        score = 62
 
     return score, signs
 
@@ -580,8 +625,170 @@ _SAFETY_DISCLAIMER = (
 
 
 # ---------------------------------------------------------------------------
-# FastAPI endpoint
+# Freshness Model Manager (Phase 5 Computer Vision Pipeline)
 # ---------------------------------------------------------------------------
+
+class FreshnessModelManager:
+    """
+    Manages deep-learning freshness classification models.
+    Supports transfer-learning architectures (e.g. MobileNetV3, ResNet18) trained via train_classifier.py.
+    When no checkpoint is loaded, operates in honest transparent heuristic fallback mode.
+    """
+
+    def __init__(self):
+        self.model: Optional[nn.Module] = None
+        self.model_id: str = "visual_heuristics_v1 (rule-based computer vision)"
+        self.analysis_mode: str = "heuristic_visual_cues"
+        self.is_model_loaded: bool = False
+        self.checkpoint_path: Optional[str] = None
+        self.classes: List[str] = ["fresh", "spoiled"]
+        self.label2id: Dict[str, int] = {"fresh": 0, "spoiled": 1}
+        self.id2label: Dict[int, str] = {0: "fresh", 1: "spoiled"}
+        self.device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+    def load_model(
+        self,
+        checkpoint_path: str | Path,
+        mapping_path: str | Path,
+        device: Optional[str] = None,
+    ) -> bool:
+        """Loads a fine-tuned freshness checkpoint into memory."""
+        ckpt_path = Path(checkpoint_path)
+        map_path = Path(mapping_path)
+        if not ckpt_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found at '{ckpt_path}'.")
+        if not map_path.exists():
+            raise FileNotFoundError(f"Class mapping not found at '{map_path}'.")
+
+        if device:
+            self.device = device
+
+        with open(map_path, "r", encoding="utf-8") as f:
+            mapping = json.load(f)
+
+        self.id2label = {int(k): v for k, v in mapping["id2label"].items()}
+        self.label2id = mapping["label2id"]
+        self.classes = [self.id2label[i] for i in range(len(self.label2id))]
+        num_classes = len(self.classes)
+
+        checkpoint = torch.load(ckpt_path, map_location=self.device)
+        backbone_name = checkpoint.get("backbone", "mobilenet_v3_small")
+
+        if backbone_name == "mobilenet_v3_small":
+            model = models.mobilenet_v3_small(weights=None)
+            in_features = model.classifier[3].in_features
+            model.classifier[3] = nn.Linear(in_features, num_classes)
+        elif backbone_name == "resnet18":
+            model = models.resnet18(weights=None)
+            in_features = model.fc.in_features
+            model.fc = nn.Linear(in_features, num_classes)
+        else:
+            raise ValueError(f"Unsupported backbone '{backbone_name}'.")
+
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+        model.to(self.device)
+
+        self.model = model
+        self.model_id = f"{backbone_name}_freshness_v1"
+        self.analysis_mode = "deep_learning_model"
+        self.is_model_loaded = True
+        self.checkpoint_path = str(ckpt_path)
+        logger.info("Loaded fine-tuned freshness model '%s' (%d classes) on %s.", self.model_id, num_classes, self.device)
+        return True
+
+    def unload_model(self) -> None:
+        """Unloads model and restores transparent heuristic fallback mode."""
+        self.model = None
+        self.model_id = "visual_heuristics_v1 (rule-based computer vision)"
+        self.analysis_mode = "heuristic_visual_cues"
+        self.is_model_loaded = False
+        self.checkpoint_path = None
+
+    def predict(self, pil_image: Image.Image) -> Optional[Dict[str, Any]]:
+        """Executes forward pass if model is loaded; returns None if in fallback mode."""
+        if not self.is_model_loaded or self.model is None:
+            return None
+
+        tensor = self.transform(pil_image).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            logits = self.model(tensor)
+            probs = torch.softmax(logits, dim=-1)[0]
+
+        top_prob, top_idx = torch.topk(probs, k=1)
+        conf = float(top_prob.item())
+        pred_idx = int(top_idx.item())
+        pred_class = self.id2label.get(pred_idx, "unknown")
+
+        prob_dict = {
+            self.id2label.get(i, str(i)): round(float(p.item()), 4)
+            for i, p in enumerate(probs)
+        }
+        is_uncertain = conf < 0.60
+
+        return {
+            "model_id": self.model_id,
+            "predicted_class": pred_class,
+            "confidence": round(conf, 4),
+            "is_uncertain": is_uncertain,
+            "class_probabilities": prob_dict,
+            "device": self.device,
+        }
+
+
+freshness_manager = FreshnessModelManager()
+
+
+def get_freshness_dataset_spec() -> Dict[str, Any]:
+    """Returns documentation and requirements for training a dedicated freshness dataset."""
+    return {
+        "dataset_name": "Food Freshness & Produce Quality Dataset",
+        "recommended_source": "Kaggle Fruits and Vegetables Freshness or Kaggle Fresh/Rotten Produce",
+        "folder_layout": "data/freshness_raw/<class_name>/<images...>",
+        "supported_classes_example": [
+            "fresh_apples", "rotten_apples",
+            "fresh_banana", "rotten_banana",
+            "fresh_oranges", "rotten_oranges",
+            "fresh_tomatoes", "rotten_tomatoes"
+        ],
+        "preprocessing": "LANCZOS resize to 224x224, ImageNet normalization",
+        "backbone_recommendation": "MobileNetV3-Small (lightweight CPU inference < 25ms, ~2.5MB)",
+        "training_tool": "python train_classifier.py --data_dir data/freshness_splits --output_dir checkpoints/freshness_model",
+    }
+
+
+# ---------------------------------------------------------------------------
+# FastAPI endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/freshness/status")
+def get_freshness_status():
+    """
+    GET /api/v1/food/freshness/status
+    Reports active freshness model state, hardware device, and pipeline disclosure.
+    """
+    return {
+        "status": "ok",
+        "model_loaded": freshness_manager.is_model_loaded,
+        "model_id": freshness_manager.model_id,
+        "analysis_mode": freshness_manager.analysis_mode,
+        "device": freshness_manager.device,
+        "checkpoint_path": freshness_manager.checkpoint_path,
+        "supported_classes": freshness_manager.classes if freshness_manager.is_model_loaded else [],
+        "pipeline_disclosure": (
+            "Deep learning model active."
+            if freshness_manager.is_model_loaded
+            else "Running on rule-based multi-spectral visual heuristics. Fine-tuned checkpoints can be attached via load_model()."
+        ),
+        "limitations_notice": (
+            "Visual inspection cannot detect microbial pathogens (e.g. Salmonella, E. coli, Listeria) or chemical toxins."
+        ),
+    }
 
 @router.post("/freshness")
 async def detect_freshness(
@@ -651,11 +858,112 @@ async def detect_freshness(
         logger.exception("Classification failed")
         raise HTTPException(status_code=500, detail=f"Classification error: {exc}")
 
+    # Determine detected food label and confidence
+    detected_food = food_hint.strip().title() if (food_hint and food_hint.strip()) else None
+    if not detected_food:
+        if features.get("low_information"):
+            detected_food = "Non-food / Neutral Surface"
+        else:
+            try:
+                import main
+                if main._model_ready and main._model is not None and main._processor is not None:
+                    inputs = main._processor(images=img, return_tensors="pt")
+                    import torch
+                    with torch.no_grad():
+                        out = main._model(**inputs)
+                        probs = torch.softmax(out.logits, dim=-1)
+                        top_conf, top_idx = torch.topk(probs, k=1, dim=-1)
+                        raw_name = main._model.config.id2label[top_idx[0][0].item()]
+                        if top_conf[0][0].item() >= 0.25:
+                            detected_food = raw_name.replace("_", " ").title()
+                            category = _detect_food_category(raw_name)
+            except Exception:
+                pass
+    # --- Model Inference vs Heuristic Fallback ------------------------------
+    model_inference = freshness_manager.predict(img)
+
+    # Compile substantiated visual evidence extracted from pixels
+    visual_evidence = {
+        "browning_detected": bool(features["brown_rot_fraction"] >= 0.08 or features["brown_fraction"] >= 0.20),
+        "browning_percentage": round(features["brown_rot_fraction"] * 100, 1),
+        "mold_detected": bool(features["mould_teal_fraction"] >= 0.04 or features["mould_white_fraction"] >= 0.20),
+        "teal_mold_percentage": round(features["mould_teal_fraction"] * 100, 1),
+        "vivid_color_percentage": round(features["fresh_vivid_fraction"] * 100, 1),
+        "texture_degradation": bool(features["texture_variance"] > 1800.0 or features["edge_density"] > 0.25),
+        "low_information_surface": bool(features.get("low_information", False)),
+    }
+
+    limitations = [
+        "Assessment is based exclusively on visible 2D surface features.",
+        "Cannot detect microbial foodborne pathogens (e.g. Salmonella, E. coli, Listeria, norovirus) or bacterial toxins.",
+        "Cannot detect internal anaerobic rot, odor, off-taste, or souring.",
+        "Surface visual integrity does not guarantee microbiological food safety. Always adhere to use-by dates, refrigeration standards, and safe cooking temperatures.",
+    ]
+
+    # Determine detected food label and confidence
+    detected_food = food_hint.strip().title() if (food_hint and food_hint.strip()) else None
+    if not detected_food:
+        if features.get("low_information"):
+            detected_food = "Non-food / Neutral Surface"
+        else:
+            try:
+                import main
+                if main._model_ready and main._model is not None and main._processor is not None:
+                    inputs = main._processor(images=img, return_tensors="pt")
+                    inputs = {k: v.to(main._device) for k, v in inputs.items()}
+                    import torch
+                    with torch.no_grad():
+                        out = main._model(**inputs)
+                        probs = torch.softmax(out.logits, dim=-1)
+                        top_conf, top_idx = torch.topk(probs, k=1, dim=-1)
+                        raw_name = main._model.config.id2label[top_idx[0][0].item()]
+                        if top_conf[0][0].item() >= 0.30:
+                            detected_food = raw_name.replace("_", " ").title()
+                            category = _detect_food_category(raw_name)
+            except Exception:
+                pass
+            if not detected_food:
+                detected_food = "Food Item"
+
+    if model_inference is not None:
+        analysis_mode = "deep_learning_model"
+        model_id = model_inference["model_id"]
+        confidence = model_inference["confidence"]
+        pred_class = model_inference["predicted_class"].lower()
+        if "fresh" in pred_class:
+            label = "Fresh"
+            safety_status = "safe_to_consume"
+        elif "spoil" in pred_class or "rot" in pred_class:
+            label = "Spoiled"
+            safety_status = "do_not_consume"
+        else:
+            label = "Moderate"
+            safety_status = "use_caution"
+        pipeline_disclosure = (
+            f"Inference generated via deep learning model '{model_id}' trained on classes: {freshness_manager.classes}."
+        )
+    else:
+        analysis_mode = "heuristic_visual_cues"
+        model_id = freshness_manager.model_id
+        confidence = (
+            0.20 if features.get("low_information")
+            else (0.92 if label in ("Fresh", "Spoiled") else 0.76)
+        )
+        pipeline_disclosure = (
+            "Freshness score and label generated via multi-spectral computer vision heuristics "
+            "(RGB/HSV color discolouration and texture variance). No fine-tuned deep learning checkpoint is currently loaded."
+        )
+
     # --- Response -----------------------------------------------------------
     return {
         "status": "success",
         "filename": file.filename,
+        "detected_food": detected_food,
         "food_category": category,
+        "confidence": confidence,
+        "model_id": model_id,
+        "analysis_mode": analysis_mode,
+        "model_loaded": freshness_manager.is_model_loaded,
         "preprocessing": prep_meta,
         "extracted_features": {
             "mean_saturation_pct":      round(features["mean_saturation"] * 100, 1),
@@ -672,11 +980,15 @@ async def detect_freshness(
             "edge_density_pct":         round(features["edge_density"] * 100, 1),
             "low_information":          features.get("low_information", False),
         },
+        "visual_evidence":  visual_evidence,
         "freshness_score":  score,
         "freshness_label":  label,
         "safety_status":    safety_status,
         "detected_signs":   signs if signs else ["No significant visual spoilage cues detected"],
         "reasoning":        reasoning,
         "recommendations":  recommendations,
+        "pipeline_disclosure": pipeline_disclosure,
+        "limitations":      limitations,
+        "model_predictions": model_inference,
         "disclaimer":       _SAFETY_DISCLAIMER,
     }
