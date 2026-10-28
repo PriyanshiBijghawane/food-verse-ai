@@ -55,6 +55,22 @@ Backend endpoints:
 - **Swagger UI:** `http://127.0.0.1:8000/docs`
 - **ReDoc:** `http://127.0.0.1:8000/redoc`
 
+### Render Backend Deployment (CPU)
+
+In the Render web service settings, set the **Root Directory** to `backend` and add the environment variable `PYTHON_VERSION=3.10.10`. Set the **Build Command** to:
+
+```sh
+python -m pip install --no-cache-dir -r requirements-render.txt
+```
+
+and the **Start Command** to:
+
+```sh
+uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+```
+
+The Render lock file pins the Python dependencies and installs CPU-only PyTorch and TorchVision. One worker prevents multiple app processes from each loading another copy of Food-101. The application currently loads the single `nateraw/food` classifier during startup. Its full-precision weights are about 328 MiB before Python, framework, and inference memory are included, so a 512 MiB runtime is not a reliable fit; use an instance with more memory if startup or inference still exceeds the limit.
+
 ---
 
 ### Step 2: Frontend Setup
